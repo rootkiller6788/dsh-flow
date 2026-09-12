@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --panel-2: #f3f4f6;
+  --border: #d1d5db;
+  --text: #374151;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --on-accent: #ffffff;
+  --track: #e5e7eb;
+  --edge: #94a3b8;
+  --shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --kind-bg: #f3f4f6;
+  --ok-bg: #ecfdf5;
+  --ok-border: #a7f3d0;
+  --err-bg: #fef2f2;
+  --err-border: #fecaca;
+  --idle: #6b7280;
+  --working: #2563eb;
+  --running: #d97706;
+  --completed: #059669;
+  --failed: #dc2626;
+  --blocked: #7c3aed;
+  --cancelled: #9ca3af;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151517;
+  --panel: #1b1b1c;
+  --panel-2: #232324;
+  --border: #353638;
+  --text: #ebeef2;
+  --muted: #979da6;
+  --accent: #5686fe;
+  --on-accent: #ffffff;
+  --track: #353638;
+  --edge: #61666b;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --kind-bg: #232324;
+  --ok-bg: #233c2c;
+  --ok-border: #4ed17e;
+  --err-bg: #3a1b1b;
+  --err-border: #f25a5a;
+  --idle: #979da6;
+  --working: #679efe;
+  --running: #f7ad31;
+  --completed: #4ed17e;
+  --failed: #f25a5a;
+  --blocked: #b7c8fe;
+  --cancelled: #81858c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; color: var(--text); background: var(--bg); }
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* Top bar */
+.topbar {
+  display: flex; align-items: center; justify-content: flex-end;
+  height: 44px; flex: none; padding: 0 16px; border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.canvas-controls { display: flex; align-items: center; gap: 6px; }
+.canvas-controls button {
+  min-height: 30px; padding: 0 11px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); color: var(--text); cursor: pointer; font-size: 13px;
+}
+.canvas-controls button:hover { background: var(--panel-2); }
+.zoom-label { min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+
+/* Stage + viewport */
+.main-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--bg); }
+.canvas-view { position: relative; display: flex; width: 100%; height: 100%; }
+.canvas-viewport {
+  position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg);
+  cursor: grab; user-select: none;
+}
+.canvas-viewport.is-panning { cursor: grabbing; }
+.canvas-content { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+.connectors { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.connectors path { fill: none; stroke: var(--edge); stroke-width: 1.6; }
+.nodes-layer { position: absolute; top: 0; left: 0; }
+
+/* Node cards */
+.node-card {
+  position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.node-card header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.node-card header strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Team node */
+.team-card { border-left: 4px solid var(--accent); }
+.team-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.team-meta { display: flex; align-items: center; gap: 6px; padding: 8px 12px; color: var(--muted); font-size: 12px; }
+.badge { padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--border); }
+.badge-running { color: var(--completed); border-color: var(--ok-border); background: var(--ok-bg); }
+.badge-halted { color: var(--failed); border-color: var(--err-border); background: var(--err-bg); }
+.badge-phase { color: var(--muted); }
+
+/* Member node */
+.member-card { border-top: 3px solid var(--idle); }
+.member-card.status-working { border-top-color: var(--working); }
+.member-card.status-removed { opacity: 0.55; }
+.member-card.status-captain { border-top-color: var(--accent); }
+.member-avatar {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 12px; flex: none;
+}
+.member-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.member-role { font-size: 11px; color: var(--muted); }
+.member-status { font-size: 11px; color: var(--muted); flex: none; }
+.member-card.status-working .member-status { color: var(--working); font-weight: 600; }
+.member-model { display: block; padding: 2px 12px 0; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member-current { margin: 0; padding: 2px 12px 0; font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member-card footer { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.progress { flex: 1; height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.progress-bar { height: 100%; background: var(--completed); transition: width .3s ease; }
+.progress-label { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Task node */
+.task-card { border-left: 4px solid var(--idle); }
+.task-card.status-running { border-left-color: var(--running); }
+.task-card.status-completed { border-left-color: var(--completed); }
+.task-card.status-failed { border-left-color: var(--failed); }
+.task-card.status-blocked { border-left-color: var(--blocked); }
+.task-card.status-cancelled { border-left-color: var(--cancelled); opacity: 0.6; }
+.task-state { font-size: 11px; color: var(--muted); flex: none; }
+.task-card.status-running .task-state { color: var(--running); font-weight: 600; }
+.task-card.status-failed .task-state { color: var(--failed); font-weight: 600; }
+.task-card.status-completed .task-state { color: var(--completed); }
+.task-meta { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 11px; color: var(--muted); }
+.task-kind { padding: 0 6px; border-radius: 4px; background: var(--kind-bg); }
+.task-id { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* Empty state */
+.empty-canvas {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; width: 100%; height: 100%; color: var(--muted); text-align: center; padding: 0 24px;
+}
+.empty-canvas strong { color: var(--text); font-size: 16px; }
+.empty-canvas p { margin: 0; max-width: 420px; }

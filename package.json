@@ -1,0 +1,44 @@
+{
+  "name": "dsh-flow",
+  "version": "0.2.0",
+  "description": "Two infinite canvases for DeepSeek Harness: the dsh-agent-teams dependency DAG (members as outer nodes, tasks as an inner graph with semantic zoom) and the session map (conversation graph).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "app.js",
+    "styles.css",
+    "map.js",
+    "map.css",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node --check index.js && node --check client.js && node --check app.js && node --check map.js",
+    "prepare": "pnpm run build",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "immediately": false
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # dsh-flow
 
-给 DeepSeek Harness 加一个**智能体画布**标签。标签里是一张无限画布，画布里有**两个可互换的图层**：一层看**团队**（agent-teams 的成员与任务依赖 DAG），一层看**会话**（对话轮次构成的非线性工作区）。
+给 DeepSeek Harness 加一个**智能体画布**标签：一张无限画布，把「会话轮次」和「智能体团队」画在同一张图上——会话按 fork 关系连成分支树，团队展开成「队长 → 成员 → 任务 DAG」的簇，成员消息以带方向的气泡流呈现在检查器里。
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B7285?style=flat-square" alt="MIT license"></a>
@@ -19,56 +19,41 @@ dsh web
 
 > 本插件**未发布到 npm**：`dsh-flow` 这个名字在 registry 上属于另一个项目，请不要用 `dsh plugin add dsh-flow`。
 
-启动后，对话区顶部的标签行会多出一个标签，点进去即可：
-
-```
-[ 对话 ]   [ 轨迹 ]   [ 智能体画布 ]
-```
-
-也可以直接打开 `/dsh-flow/`（团队图层）或 `/dsh-flow/map/`（会话地图图层）。
+启动后，对话区顶部的标签行会多出一个「智能体画布」标签；也可以直接打开 `/dsh-flow/`。
 
 ### 依赖
 
-| 图层 | 依赖 |
+| 画布内容 | 依赖 |
 | --- | --- |
-| **智能体画布** | 必须已安装并启用 [`@nanmicoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams)，且至少拉起过一个团队，否则该层为空态 |
-| **会话地图** | 无额外依赖，直接用宿主会话 |
+| 会话分支树 | 无额外依赖，直接用宿主会话 |
+| 团队簇（成员 / 任务 DAG） | 需安装并启用 [`@nanmicoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams)，且至少拉起过一个团队；未安装时该区域为空，不影响会话层 |
 
-## 两张画布
+## 画布上有什么
 
-两个图层在**同一个标签、同一个 iframe**里，由画布控制行最左边的 **转换** 按钮换层：
+画布是**一个页面、一个引擎、一张图**，节点分两类：
 
-```
-[ 转换 ]  [ 重置 ]  [ − ]  [ 100% ]  [ ＋ ]
-```
+| 节点 | 画的是什么 | 数据源 |
+| --- | --- | --- |
+| **会话轮次卡** | 一轮对话（提问 + 回答），按 DSH 原生 fork 关系连成分支树，可追问 / 分支 / 归档；成员中继与子代理通知等**智能体事件轮**以派生标签呈现（`论文手 → 队长`），不暴露协议原文 | 宿主 `sessions` + `workspaces` 服务，投影落盘到 `flow/workspaces.json` |
+| **团队泳道带** | 从所属会话的时间轴上长出来的一条区域：头部（名称/状态/进度）挂在最新轮正下方，成员**泳道**贯穿整个时间段，任务 chip 按依赖深度排在各自成员的泳道上（层级 + 先后）；成员发言轮沿时间轴垂直落一条刻度到对应泳道——层级和时间轮次同读一张图 | 团队经 `captainSessionId` 关联到 DSH 会话；前端 1s 轮询 agent-teams 的 `/state`，团队数据不落盘 |
 
-两层的控制行逐字相同，所以往哪边切都行。**默认停在「智能体画布」图层**——标签叫什么就先给什么。
+缩放到 **55%** 以下时团队簇折叠成一张摘要卡；会话树不受影响。
 
-| 图层 | 路由 | 画的是什么 | 数据源 |
-| --- | --- | --- | --- |
-| **智能体画布** | `/dsh-flow/` | 多 agent 团队：外层是**成员**，放大到阈值后展开成**任务依赖 DAG**（两层语义缩放） | 只读轮询 agent-teams 的 `GET /plugins/dsh-agent-teams/state` |
-| **会话地图** | `/dsh-flow/map/` | 对话轮次构成的**非线性工作区**（父/子分支树），可分支 / 继续 / 发消息 | 宿主 `sessions` + `workspaces` 服务，落盘到 `flow/workspaces.json` |
+### 多智能体对话
 
-标签选择由宿主**按会话持久化**（`dsh.conversation.<sessionId>`），存着的 id 找不到时会回落到「对话」——所以插件卸载不会把某个会话困在空白页里。画布页自身不画任何导航：没有「回到对话」按钮，也没有内嵌切换条。
+点开一张轮次卡，检查器里是**参与者气泡流**，不是一段文本：用户消息、「我」气泡、成员中继消息（头像 + 发送者 → 接收者方向）各自成块，工具调用折叠在过程记录里。
+
+agent-teams 会把成员消息以 `Agent <uuid> sent a message:【发送者 → 接收者】正文` 的信封中继进宿主会话。本插件在**投影层就把信封拆成结构**（`message.agent`），渲染层再对旧数据做同规则的兜底解析——UUID 和英文信封不会出现在画布上。
 
 ## 用起来
 
-### 智能体画布图层
-
-- **语义缩放**：缩放倍率低于 `1.5` 只渲染 team + member；跨过阈值展开 task 节点与依赖边。边由 `task.dependencies` 现算，不落盘。
-- **拖拽与记忆**：卡片可拖动，坐标存在浏览器 `localStorage`，只作视觉元数据——节点身份始终是真身（`teamId` / member name / task id），位置永远不确定身份。
-- **只读**：不发起 halt / plan / edit，写操作仍在原生对话里由 AgentTeams 工具完成。
-
-### 会话地图图层
-
-- 一张卡片 = 一轮对话（提问 + 回答），分支按 DSH 原生 fork 关系连成树。
-- **点卡片**（非按钮区域）打开右侧**检查器**：只读展开这一轮的提问/回答/工具调用，同时把 DSH 的当前会话切到它——不离开画布。
-- **追问 / 分支**：检查器底部与卡片上的 `＋` / 分支按钮会在画布上开一张草稿卡，输入仍发生在画布上——**这是地图唯一的写入口**。
-- **DSH 按钮 / 详情标题**：走同一个动作 `flow:open-session`，即切回宿主「对话」标签并锚定到那一轮。想继续追问、看完整过程记录、创建分支，都在原生对话里做。
-- **归档**：卡片上的归档按钮把会话移出画布（记入 `hiddenSessionIds`），之后 DSH 的列表刷新不会把它重建回来。
-- **折叠 / 快捷词**：有后续对话的卡片可折叠；草稿卡上的常用补充词可增删（最多 12 个，单个最多 16 字）。
-- **工作区自动跟随**：在 DSH 原生界面换工作区，画布跟着换，不需要再选一次。
-- 滚轮在卡片上滚动该卡自己的回答，在空白处缩放画布；`Esc` 关闭检查器。
+- **拖拽与记忆**：卡片可拖动，会话卡坐标存浏览器 `localStorage`，只作视觉元数据——节点身份始终是真身（DSH 会话 / teamId / 成员名），位置永远不确定身份。「重置」回到自动布局。
+- **检查器**：点卡片（非按钮区域）打开右侧检查器，同时把 DSH 的当前会话切到它——不离开画布。`Esc` 关闭。
+- **追问 / 分支**：检查器底部与卡片角标会在画布上开一张草稿卡，输入发生在画布上——这是唯一的写入口；快捷词可增删（最多 12 个，单个 16 字）。
+- **DSH 按钮**：切回宿主「对话」标签并锚定到那一轮；看完整过程记录在原生对话里做。
+- **归档**：卡片上的归档按钮把会话移出画布（记入 `hiddenSessionIds`），DSH 的列表刷新不会把它重建回来。
+- **主题跟随**：浅 / 深色跟随宿主（`theme/change` 事件 → `data-theme`），深色由同一套设计 token 驱动。
+- 滚轮在卡片上滚动该卡自己的回答，在空白处缩放画布。
 
 ## 配置
 
@@ -98,45 +83,32 @@ dsh web
 
 ```
 dsh-flow (纯 JS，无运行时依赖)
-├── index.js            # 宿主侧：复用 DSH webServer，serve 两个页面 + 会话地图 API
-├── client.js           # 客户端：一个 conversation.view 标签（内含两个图层）+ 主题/语言跟随 + 会话动作中继
-├── app.js              # 【智能体画布图层】引擎 + 数据归一化 + 语义缩放 + 轮询
-├── styles.css          # 【智能体画布图层】team / member / task 卡片样式
-├── map.js              # 【会话地图图层】画布引擎 + 会话投影轮询
-├── map.css             # 【会话地图图层】样式（含深色主题）
+├── index.js            # 宿主侧：WorkspaceStore + 会话事件投影 + 中继信封解析 + 路由
+├── client.js           # 客户端：一个 conversation.view 标签（内嵌一个 iframe）+ 主题跟随 + 会话动作中继
+├── engine.js           # 画布引擎：相机 / 手势 / 视口裁剪 / 连线几何 / 拖拽绑定（与业务无关，可复用）
+├── theme.css           # 设计 token（浅/深一套变量）+ 全部组件样式
+├── src/                # 统一画布页面（ES 模块）
+│   ├── canvas.js       #   入口：宿主桥、实时回复、轮询、启动
+│   ├── core.js         #   共享状态、几何常量、localStorage、宿主桥接、成员配色
+│   ├── markdown.js     #   Markdown 渲染（含 ■ 分节规范化）
+│   ├── relay.js        #   智能体信封解析（中继/成员消息/子代理通知）
+│   ├── session.js      #   会话投影数据层 + 轮次卡 + 分支图布局
+│   ├── teams.js        #   团队轮询 + 层级区域布局（团队 ⊃ 成员子区域）
+│   ├── scene.js        #   场景装配：需求时间轴 + 嵌套区域 + 类型化连线
+│   ├── view.js         #   相机、虚拟化挂载、节点渲染、检查器、主渲染
+│   └── actions.js      #   交互：草稿 / 追问 / 分支 / 归档 / 快捷词 / 选择追问
 ├── cordis.patch.yml    # 插入 dsh-flow 服务
 └── package.json        # dsh.bundle.patch + dsh.client.inject
 ```
 
-`client.js` 对 slot 只注册**一条**条目（`conversation.view`、`order: 20`），宿主把 `slots.entries('conversation.view')` 直接投影成标签行（按 `order` 升序，宿主自己是 `chat`=0 / `trajectory`=10）。
-
-### 一个标签、两个图层
-
-```js
-const LAYERS = {
-  team:    { src: '/dsh-flow/',     label: 'view.canvas' },   // 默认层，标签名就是它
-  session: { src: '/dsh-flow/map/', label: 'view.map' },
-}
-let layer = 'team'   // 模块级状态，不是 React state：宿主只渲染激活 View，
-                     // 切走/切回会卸载重挂，层级不该跟着丢
-```
-
-标签体是**一个 iframe**，除此之外什么都不渲染。iframe 在挂载时创建、卸载时移除；一旦离开文档，它的浏览上下文就销毁了——所以切走再切回来必然是一次重新加载，回来后落在**你离开时的那一层**。
-
-**换层**靠给活着的 iframe 赋 `src`（即一次导航），换层前先给容器加 `is-opening` 藏住旧层像素，避免深色模式下闪一帧白页。一个 frame 扛两层，所以「这条消息发给谁」只能由 `layer` 判断：会话地图的推送统一走 `sendSession(...)`，只在 `layer === 'session'` 时发出；主题则**谁在屏幕上就发给谁**。
-
 ### 两条数据通路
 
-- **智能体画布图层**：纯前端，1s 轮询 agent-teams 的 `/state`。宿主侧只 serve 静态文件，**无状态**。
-- **会话地图图层**：宿主侧 `WorkspaceStore` + 会话事件投影。投影由 `session/created` 与 `session/event` 驱动，**与图层无关地一直在跑**，所以即使没打开过画布，会话也已经在图里了。写入去抖（800ms 一次全量落盘，避免每个事件一次写盘把主线程打满），并带跨进程文件锁与外部修改告警。
-  - 画布与宿主**会话列表**的对齐（`/map-api/sessions/sync`）走的是另一条路：由客户端在 iframe `load` 时推一次，而不是持续轮询。换到会话地图层本身就是一次导航，所以每次 转换 过去都会先对齐一遍。地图层自己另外以 1s 轮询 `/map-api/projection` 拉最新的投影。
+- **会话层**：宿主侧 `WorkspaceStore` + 会话事件投影。投影由 `session/created` 与 `session/event` 驱动，**与画布是否打开无关地一直在跑**；写入去抖（800ms 全量落盘），带跨进程文件锁与外部修改告警。画布以 1s 轮询 `/dsh-flow/map-api/*` 拉最新投影；与宿主会话列表的对齐（`/map-api/sessions/sync`）由客户端在 iframe `load` 时推一次。
+- **团队层**：纯前端 1s 轮询 agent-teams 的 `/state`，宿主侧不存团队数据。
 
-### 主题与语言
+### 主题
 
-两个图层都跟随宿主，并且走**宿主自己的服务**、不做 DOM 嗅探，所以 `system` 偏好会被解析成真实的浅/深色，区域化语言 id（`zh-CN`）也能正确归到中文：
-
-- 深色：`ctx.theme.getTheme().active.colorScheme` 取初值 + `ctx.on('theme/change')` 跟随 → `postMessage('flow:theme')` → iframe 设 `data-theme="dark"`，CSS 变量切换。
-- 语言：`ctx.locale.getSnapshot().active` 取初值 + `ctx.locale.subscribe()` 跟随 → 标签文案用 `ctx.locale.bind(NS)` 在注册时取（thunk，换语言不用重新注册）。
+画布跟随宿主的**深 / 浅色**（`ctx.theme.getTheme().active.colorScheme` 取初值 + `theme/change` 跟随）。画布内部文案为中文，标签名跟随宿主中 / 英。
 
 ## 参考
 
@@ -147,14 +119,12 @@ let layer = 'team'   // 模块级状态，不是 React state：宿主只渲染�
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | GET | `/dsh-flow` | 302 → `/dsh-flow/` |
-| GET | `/dsh-flow/` | 智能体画布页 |
-| GET | `/dsh-flow/app.js` · `/dsh-flow/styles.css` | 智能体画布资源 |
-| GET | `/dsh-flow/map` | 302 → `/dsh-flow/map/` |
-| GET | `/dsh-flow/map/` | 会话地图页 |
-| GET | `/dsh-flow/map.js` · `/dsh-flow/map.css` | 会话地图资源 |
+| GET | `/dsh-flow/` | 统一画布页 |
+| GET | `/dsh-flow/engine.js` · `/dsh-flow/canvas.js` · `/dsh-flow/theme.css` | 画布资源 |
+| GET | `/dsh-flow/map` · `/dsh-flow/map/` | 302 → `/dsh-flow/`（旧路径兼容） |
 | * | `/dsh-flow/map-api/*` | 见下表 |
 
-### 会话地图 API
+### 画布 API
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
@@ -175,17 +145,15 @@ let layer = 'team'   // 模块级状态，不是 React state：宿主只渲染�
 
 | 方向 | 消息 | 载荷 | 行为 |
 | --- | --- | --- | --- |
-| 画布 → 宿主 | `flow:switch-layer` | — | 翻转 `layer` 并给 iframe 重赋 `src` |
-| 画布 → 宿主 | `flow:request-current` | — | 回送当前工作区与会话（仅会话地图层） |
+| 画布 → 宿主 | `flow:request-current` | — | 回送当前工作区与会话 |
 | 画布 → 宿主 | `flow:open-session` | `sessionId, seq?` | `sessions.open()` + 切回「对话」标签 + 按 `seq` 锚定滚动 |
 | 画布 → 宿主 | `flow:activate-session` | `sessionId` | `sessions.open()`，不离开画布 |
 | 画布 → 宿主 | `flow:fork-session` | `sessionId, atSeq?, requestId` | `sessions.fork()` |
 | 画布 → 宿主 | `flow:send-message` | `sessionId, text, requestId` | `session.prompt(text, 'queue')` |
 | 画布 → 宿主 | `flow:create-session` | `workspaceId?, cwd?, requestId` | `sessions.create()` |
 | 宿主 → 画布 | `flow:theme` · `flow:locale` | `dark` / `locale` | 主题与语言跟随 |
-| 宿主 → 画布 | `flow:workspaces` · `flow:current-session` | 工作区 / 当前会话 | 会话地图的输入 |
+| 宿主 → 画布 | `flow:workspaces` · `flow:current-session` | 工作区 / 当前会话 | 画布的输入 |
 | 宿主 → 画布 | `flow:live-reply` | `sessionId, running, text` | 正在生成时的实时回复 |
-| 宿主 → 画布 | `flow:map-opened` | — | 会话地图装载后重绘。**不重置相机**：同一会话来回换层要留住视口 |
 | 宿主 → 画布 | `flow:forked-session` · `flow:created-session` · `flow:message-sent` · `flow:bridge-error` | `requestId, …` | 结算画布发起的 RPC |
 
 带 `requestId` 的调用由画布侧 `dshRpc()` 等待，超时 20s；直接在浏览器里打开画布页（不在 DSH 里）时立即拒绝。
@@ -195,8 +163,8 @@ let layer = 'team'   // 模块级状态，不是 React state：宿主只渲染�
 | 位置 | 内容 |
 | --- | --- |
 | `<DSH home>/flow/workspaces.json`（+ `.lock`） | 工作区 / 节点 / 投影消息；**只支持单实例写入** |
-| `dsh-flow:positions:v1` | 智能体画布卡片坐标 |
-| `dsh-flow:map-card-positions:v3` | 会话地图卡片坐标 |
+| `dsh-flow:map-card-positions:v3` | 会话卡坐标（与旧版画布兼容） |
+| `dsh-flow:cluster-positions:v1` | 团队簇卡片坐标 |
 | `dsh-flow:map-collapsed-cards:v1` | 折叠状态 |
 | `dsh-flow:map-quick-phrases:v1` | 快捷词 |
 | `dsh-flow:map-branch-anchors` | 分支锚点 |
@@ -205,42 +173,35 @@ let layer = 'team'   // 模块级状态，不是 React state：宿主只渲染�
 
 ## 设计取舍
 
-**为什么是一个标签两个图层，而不是两个标签。** 早先这两层是平级标签（`flow` / `flow-map`）。宿主只渲染当前激活的 View（`renderSlot(..., { only: active.id })`），所以两个标签必然是**两个文档、两套引擎**，标签行把一个画布读成了两个功能。现在合成一个：两套引擎仍是各自独立的文档（没有合并、没有重写），只是不再各占一个标签。**代价**：`src` 变更就是一次导航，所以每次 转换 都是一次重新加载（和过去切标签同价）。这是保留两套引擎的诚实成本。
+**一张画布，不是一个标签里塞两个图层。** 会话与团队本来就是同一次工作的两个视角：团队由会话拉起，任务在会话里汇报。拆成两个页面只会让两边各养一套引擎、各长一套外观，最后对不上。现在引擎（`engine.js`）只管相机、手势、裁剪和连线，与业务无关；会话与团队都是它上面的节点和边。
 
-**画布不画导航，也不画品牌。** 换标签和回对话是宿主标签行的职责；图层之间的切换是画布控制行的职责。页面上不出现插件名——**画布叫什么只由宿主标签行决定，当前在哪一层只由控制行的 转换 决定**。
+**中继消息在投影层结构化。** 信封解析放在宿主侧 `index.js` 而不是渲染层，因为落盘的就是脏数据，晚洗不如早洗；渲染层只对存量旧数据做同规则兜底。
 
-**会话地图没有自己的侧边栏。** 会话列表、切换会话、新建会话、工作区选择器宿主全都有，画布只画图，多一条侧边栏只会和宿主那条打架。相应地「新建会话」只在**空画布**时出现一次（画布中央那个大按钮），一旦画布上有卡片就交给宿主。
+**写操作收口到草稿卡。** 画布上的追问 / 分支 / 新建会话都走草稿卡这一个入口，其余动作（切会话、锚定、归档之外的一切）仍由宿主原生对话完成——画布不做第二个 composer。
 
-**隐藏宿主的原生 composer。** 宿主在「对话」标签底部常驻一个会话级 composer（`conversation.composer` slot），切到画布时它仍显示在 iframe 下方。插件利用「宿主只渲染激活视图」这一点，在 iframe 一挂载就往 `<body>` 加 `dsh-flow-view-active` 类，用 scoped CSS 隐藏它，切回对话/轨迹即还原：
+**团队簇不落盘。** 团队是临时实体（归档或宿主重启即消失），只有它的**位置**值得记住，身份始终由 agent-teams 的 `/state` 决定。
 
-- 隐藏的是**整条** composer，不是那张输入框——`[data-composer-seat]` 里装着宿主拼出来的整条 slot 链（对话编辑器、`user-questions` 追问面板、`subagent` 只读 composer、附件区），所以它们都不会再冒到画布上。宿主另一形态（`[data-conversation-composer-overlay]`）也有同样的规则兜住。
-- 同一条规则还负责**列宽拖拽手柄**：宿主把两个 `[data-width-handle]` 一直摆在对话列两侧（`position:absolute; top:0; bottom:0; cursor:col-resize`），只隐藏输入框的话它们会横在画布左右边缘上——在画布里拖一下，改的是宿主对话列的宽度。宿主自己遇到 overlay 形态的 composer 时也会隐藏它们，这里用的是同一招，只是换成本插件挂载的判据。
-- 挂载用 **`useLayoutEffect`** 而不是 `useEffect`：被动 effect 跑在宿主**已经画完一帧之后**，每次切进画布原生输入框都会先亮一帧。实测（无头 Chromium 按帧采样，`对话 → 智能体画布`）切过去后 **541 帧里 0 帧**画出原生输入框，第一帧就已经是隐藏态。
-
-**两个图层共用一套外观规格。** 会话地图的顶栏与控制行是照着智能体画布抄的——同样的 44px 顶栏、下边框、按钮高度/内距/字号/圆角、46px 定宽的比例标签，以及同一套背景色（浅色 `#f5f7fa` 画布 + `#fff` 面板，深色 `#151517` 画布 + `#1b1b1c` 面板）。
+**隐藏邻居插件的悬浮 UI。** agent-teams 会往对话列注入自己的徽标与活动面板；在画布视图上它们会盖住画布控件。插件侧用其 CSS-module 命名空间前缀做 scoped 隐藏，只在本插件视图生效，原生对话里不碰它。
 
 ## 开发
 
 ```sh
 node --check index.js && node --check client.js \
-  && node --check app.js && node --check map.js
+  && node --check engine.js && node --check canvas.js
 
 dsh web
-# 对话区顶部标签行点「智能体画布」，再用控制行最左边的「转换」换层
+# 对话区顶部标签行点「智能体画布」
 ```
 
-改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`app.js` / `map.js` / CSS 是每次请求现读（`cache-control: no-store`），改完刷新页面即可。
+改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `canvas.js` / `theme.css` 是每次请求现读（`cache-control: no-store`），改完刷新页面即可。
 
 ## 已知边界
 
-- **转换 = 一次重载**：宿主一次只渲染当前 View，iframe 换 `src` 就是导航，旧层的浏览上下文销毁。会话地图的 JS 有 100KB+，每次换到它都有一次重载代价。
-- **画布引擎有两份拷贝**：`app.js` 与 `map.js` 各自带一套相机/缩放/平移/视口裁剪/bezier/位置持久化（`app.js` 当年就是从 `dsh-synapse` 复制魔改的，`map.js` 也是那套），所以两边很容易漂。已统一的是**外观**与**入口**，引擎本身还没合并。要合并数据层是更后面的事：会话地图的节点身份是 DSH 会话（持久），智能体画布的节点是 agent-teams 的 team/member/task（**临时**，团队归档或宿主重启即消失，只靠 1s 轮询 `/state`，没有自己的存储），硬并成一张图就得选一套身份体系。
-- **样式值也是两份**：`styles.css` 与 `map.css` 各有一份顶栏/控制行的数值，去重要把相机层抽成共用模块。
-- **会话地图图层内部未国际化**：标签名会跟随宿主中/英，地图内部文案暂为中文。
-- **画布页不带导航 chrome**：入口只有宿主标签行。标签只在**有会话**时出现（宿主对空白会话整个返回 null）。若宿主 `slots` 服务缺失，标签不会注册，此时只能用直链。
-- **智能体画布图层硬依赖 agent-teams**：未安装或没起过团队时为空态。
+- **团队簇硬依赖 agent-teams**：未安装或没起过团队时该区域为空，会话层不受影响。
+- **团队与会话之间没有连线**：agent-teams 的 `/state` 不暴露团队由哪个会话拉起，两侧只能在同一张画布上并列，暂时连不起来。
 - **`workspaces.json` 只支持单实例写入**：有跨进程锁与告警，双开仍可能互相覆盖。
-- **已知的邻居**（不是本插件的东西，也不归本插件管）：`@nanmicoder/dsh-agent-teams` 有一颗悬浮徽标（`.aYQbCq_badge{position:absolute;top:64px;right:18px}`），在原生「对话」里浮在空白处，到画布页正好压住控制行最右边的 **＋**（重叠约 11px）。要处理的话得在插件侧为它加一条 scoped 规则，或反馈给上游。
+- **画布内部文案未国际化**：标签名会跟随宿主中/英，画布内部文案暂为中文。
+- **画布页不带导航 chrome**：入口只有宿主标签行。标签只在**有会话**时出现（宿主对空白会话整个返回 null）。若宿主 `slots` 服务缺失，标签不会注册，此时只能用直链。
 - **没有测试**：仓库里没有测试目录。
 
 ## 许可证

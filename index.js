@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 
 export const name = 'dsh-flow'
 export const inject = ['webServer', 'sessions']
@@ -12,14 +12,14 @@ const MAX_NOTE_LENGTH = 4_000
 // at the detail view instead of silently cutting mid-sentence.
 const MAX_PROJECTION_LENGTH = 8_000
 const PROJECTION_TRUNCATED_SUFFIX = '\n——…（详情查看全文）'
-const TOPIC_COLORS = ['#0f766e', '#2563eb', '#be123c', '#7c3aed', '#b45309']
+const TOPIC_COLORS = ['#0f766e', '#0e7490', '#6d28d9', '#b45309', '#be123c']
 const LOCK_STALE_MS = 60_000
 // Deferred (event-projection) writes coalesce into one save per window, so a
 // burst of session events costs a single full-state write instead of one per
 // event (issue #13: per-event saves pinned the main thread at ~90% CPU).
 const SAVE_DEBOUNCE_MS = 800
 
-/** JSON persistence for the Synapse workspace graph. */
+/** JSON persistence for the canvas workspace graph. */
 export class WorkspaceStore {
   constructor(dataFile) {
     if (typeof dataFile !== 'string' || dataFile.length === 0) throw new Error('dsh-flow: config.dataFile must be a non-empty path')
@@ -110,7 +110,7 @@ export class WorkspaceStore {
     })
   }
 
-  /** Keep only the canvas graph in Synapse; DSH remains the source of session truth. */
+  /** Keep only the canvas graph here; DSH remains the source of session truth. */
   async syncSessions(sessions, removedSessionIds = []) {
     return this.mutate(() => {
       if (!Array.isArray(sessions)) throw new InputError('sessions 必须是数组')
@@ -444,12 +444,17 @@ export class WorkspaceStore {
         ? { turn: event.data?.turn, step: event.data?.step, process: [] }
         : {}),
     }
+    const agent = classifyAgentText(projection.text)
+    if (agent !== null) {
+      message.agent = { kind: agent.kind, agentId: agent.agentId, from: agent.from, to: agent.to, ...(agent.label !== undefined ? { label: agent.label } : {}) }
+      message.text = agent.text
+    }
     this.attachPendingProcess(thread, message)
     thread.messages.push(message)
     thread.updatedAt = at
     workspace.updatedAt = at
-    if (thread.dshSessionTitle === null && projection.kind === 'user') {
-      thread.title = titleFromText(projection.text)
+    if (thread.dshSessionTitle === null && projection.kind === 'user' && message.agent === undefined) {
+      thread.title = titleFromText(message.text)
       thread.dshSessionTitle = thread.title
     }
   }
@@ -566,7 +571,7 @@ function normalizeState(value) {
     }
     migrated = true
   } else {
-    throw new Error('expected Synapse data version 1, 2, 3, or 4')
+    throw new Error('expected dsh-flow data version 1, 2, 3, or 4')
   }
   if (state.version !== 4) {
     if (foldLegacyToolCards(state.workspaces)) migrated = true
@@ -705,6 +710,55 @@ function titleFromText(text) {
   return (line.length > 42 ? `${line.slice(0, 42)}...` : line) || 'DSH 会话'
 }
 
+/**
+ * agent-teams (and the harness beneath it) inject agent traffic into the host
+ * session as plain text. Four shapes exist in the wild:
+ *   Agent <uuid> sent a message:【发送者 → 接收者】正文      (member relay)
+ *   Agent <uuid> sent a message:正文                        (route-less relay)
+ *   AgentTeams message from member <name>: 正文              (member → captain)
+ *   Background subagent <uuid> finished … Its closing message: 正文
+ * Structuring them at projection time is what lets the canvas show a turn as
+ * a real multi-agent conversation (who spoke to whom) instead of protocol
+ * text with a raw UUID in it — for questions and answers alike.
+ */
+const RELAY_ROUTE_RE = /^Agent\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s+sent a message:\s*【([^】\n]*)】\s*/
+const RELAY_PLAIN_RE = /^Agent\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s+sent a message:\s*/
+const MEMBER_RELAY_RE = /^AgentTeams message from member\s+([^:：\n]+)[:：]\s*/
+const SUBAGENT_NOTICE_RE = /^Background subagent\s+([0-9a-f][0-9a-f-]{8,})\s+/
+const SUBAGENT_CLOSING_RE = /Its closing message:\s*/
+
+function classifyAgentText(text) {
+  if (typeof text !== 'string') return null
+  let match = RELAY_ROUTE_RE.exec(text)
+  if (match !== null) {
+    const route = match[2].split(/→|->/)
+    const from = (route[0] ?? '').trim()
+    const to = (route[1] ?? '').trim()
+    if (from !== '' || to !== '') return { kind: 'relay', agentId: match[1], from: from || '成员', to, text: text.slice(match[0].length).trim() }
+  }
+  match = MEMBER_RELAY_RE.exec(text)
+  if (match !== null) {
+    const from = match[1].trim()
+    if (from !== '') return { kind: 'relay', agentId: null, from, to: '队长', text: text.slice(match[0].length).trim() }
+  }
+  match = SUBAGENT_NOTICE_RE.exec(text)
+  if (match !== null) {
+    let body = text.slice(match[0].length)
+    let label = '子代理通知'
+    const closing = SUBAGENT_CLOSING_RE.exec(body)
+    if (closing !== null) {
+      label = '子代理完成汇报'
+      body = body.slice(closing.index + closing[0].length)
+    }
+    return { kind: 'notice', agentId: match[1], from: '子代理', to: '', label, text: body.trim() }
+  }
+  match = RELAY_PLAIN_RE.exec(text)
+  if (match !== null) {
+    return { kind: 'relay', agentId: match[1], from: `agent ${match[1].slice(0, 8)}`, to: '', text: text.slice(match[0].length).trim() }
+  }
+  return null
+}
+
 function sessionCwd(session) {
   const cwd = session.header?.meta?.cwd ?? session.header?.cwd
   return typeof cwd === 'string' && cwd.trim() !== '' ? cwd : '未指定工作目录'
@@ -737,23 +791,21 @@ function sendFile(res, contentType, body) {
   res.end(body)
 }
 
-/** The session-map canvas (dsh-synapse's conversation graph, merged in). */
-function mapPage() {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synapse for DSH</title><link rel="stylesheet" href="/dsh-flow/map.css"></head><body><div id="app"></div><script src="/dsh-flow/map.js"></script></body></html>`
+/** The unified agent canvas: one page, one engine, one graph. */
+function canvasPage() {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/theme.css"></head><body><div id="app"></div><script src="/dsh-flow/engine.js"></script><script type="module" src="/dsh-flow/src/canvas.js"></script></body></html>`
 }
 
-/** The team canvas (members as outer nodes, tasks as an inner dependency DAG). */
-function flowPage() {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/styles.css"></head><body><div id="app"></div><script src="/dsh-flow/app.js"></script></body></html>`
-}
+const CANVAS_SRC_FILES = ['core.js', 'markdown.js', 'relay.js', 'session.js', 'teams.js', 'scene.js', 'view.js', 'actions.js', 'canvas.js', 'artwork.js']
 
 /**
- * Mount the dsh-flow routes on the existing DSH Web Server: two static canvas
- * pages (the team canvas at /dsh-flow/, the session map at /dsh-flow/map/) plus
- * the session-map's workspace API.
+ * Mount the dsh-flow routes on the existing DSH Web Server: the unified canvas
+ * page plus its workspace API. The old per-layer paths (/dsh-flow/map/) remain
+ * as redirects so stale links and saved routes land on the unified canvas.
  */
 export function apply(ctx, config) {
   const store = new WorkspaceStore(config?.dataFile)
+  const teamsFile = join(dirname(config?.dataFile ?? '.'), 'teams.json')
   const autoProjection = config?.autoProjection !== false
   const projectionWorkspaceTitle = typeof config?.projectionWorkspaceTitle === 'string' && config.projectionWorkspaceTitle.trim() !== ''
     ? config.projectionWorkspaceTitle.trim().slice(0, MAX_TITLE_LENGTH)
@@ -822,6 +874,26 @@ export function apply(ctx, config) {
       const thread = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)$/i.exec(path)
       if (thread !== null && req.method === 'PATCH') return sendJson(res, 200, { thread: await store.updateThread(thread[1], await readJson(req)) })
       if (thread !== null && req.method === 'DELETE') return sendJson(res, 200, await store.removeThread(thread[1]))
+      // Team snapshot storage: the canvas polls the live agent-teams feed and
+      // mirrors it here, so team regions keep rendering even after the
+      // agent-teams plugin is removed (its data is frozen, not live).
+      if (path === '/dsh-flow/map-api/teams' && req.method === 'GET') {
+        try {
+          const stored = JSON.parse(await readFile(teamsFile, 'utf8'))
+          return sendJson(res, 200, { teams: Array.isArray(stored.teams) ? stored.teams : [] })
+        } catch {
+          return sendJson(res, 200, { teams: [] })
+        }
+      }
+      if (path === '/dsh-flow/map-api/teams/snapshot' && req.method === 'POST') {
+        const body = await readJson(req)
+        if (!Array.isArray(body?.teams)) throw new InputError('teams 必须是数组')
+        const temporaryFile = `${teamsFile}.${process.pid}.tmp`
+        await writeFile(temporaryFile, `${JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), teams: body.teams })}
+`, 'utf8')
+        await rename(temporaryFile, teamsFile)
+        return sendJson(res, 200, { stored: body.teams.length })
+      }
       return sendJson(res, 404, { error: '接口不存在' })
     } catch (error) {
       if (error instanceof InputError) return sendJson(res, 400, { error: error.message })
@@ -845,16 +917,34 @@ export function apply(ctx, config) {
   }
   const route = (kind, path, handler, label) => ctx.effect(() => ctx.webServer.register({ kind, path, handler: (req, res) => serve(req, res, handler) }), `dsh-flow: ${label}`)
 
-  // Team canvas.
+  // Unified canvas.
   route('exact', '/dsh-flow', redirect('/dsh-flow/'), 'canvas redirect')
-  route('exact', '/dsh-flow/', (_req, res) => sendFile(res, 'text/html; charset=utf-8', flowPage()), 'canvas page')
-  route('exact', '/dsh-flow/app.js', file('text/javascript; charset=utf-8', './app.js'), 'canvas app')
-  route('exact', '/dsh-flow/styles.css', file('text/css; charset=utf-8', './styles.css'), 'canvas styles')
-
-  // Session map.
-  route('exact', '/dsh-flow/map', redirect('/dsh-flow/map/'), 'map redirect')
-  route('exact', '/dsh-flow/map/', (_req, res) => sendFile(res, 'text/html; charset=utf-8', mapPage()), 'map page')
-  route('exact', '/dsh-flow/map.js', file('text/javascript; charset=utf-8', './map.js'), 'map app')
-  route('exact', '/dsh-flow/map.css', file('text/css; charset=utf-8', './map.css'), 'map styles')
+  route('exact', '/dsh-flow/', (_req, res) => sendFile(res, 'text/html; charset=utf-8', canvasPage()), 'canvas page')
+  route('exact', '/dsh-flow/engine.js', file('text/javascript; charset=utf-8', './engine.js'), 'canvas engine')
+  for (const name of CANVAS_SRC_FILES) {
+    route('exact', `/dsh-flow/src/${name}`, file('text/javascript; charset=utf-8', `./src/${name}`), `canvas src ${name}`)
+  }
+  route('exact', '/dsh-flow/theme.css', file('text/css; charset=utf-8', './theme.css'), 'canvas styles')
+  // Character portraits for the team inspector (exact .png names only).
+  route('prefix', '/dsh-flow/assets', (req, res) => {
+    const name = new URL(req.url ?? '/', 'http://dsh.local').pathname.slice('/dsh-flow/assets/'.length)
+    if (!/^[a-z0-9-]+\.png$/i.test(name)) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      return res.end('not found')
+    }
+    readFile(new URL(`./assets/${name}`, import.meta.url)).then(
+      png => {
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' })
+        res.end(png)
+      },
+      () => {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('not found')
+      },
+    )
+  }, 'canvas portraits')
+  // Legacy layer paths: both layers now live at /dsh-flow/.
+  route('exact', '/dsh-flow/map', redirect('/dsh-flow/'), 'legacy map redirect')
+  route('exact', '/dsh-flow/map/', redirect('/dsh-flow/'), 'legacy map redirect')
   route('prefix', '/dsh-flow/map-api', api, 'map api')
 }

@@ -1,7 +1,7 @@
 {
   "name": "dsh-flow",
-  "version": "0.2.0",
-  "description": "Two infinite canvases for DeepSeek Harness: the dsh-agent-teams dependency DAG (members as outer nodes, tasks as an inner graph with semantic zoom) and the session map (conversation graph).",
+  "version": "0.3.0",
+  "description": "One unified infinite canvas for DeepSeek Harness: conversation turns as a fork tree, agent teams as captain-member-task DAG clusters, and member messages rendered as a directed bubble stream in the inspector.",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -13,15 +13,15 @@
   "files": [
     "index.js",
     "client.js",
-    "app.js",
-    "styles.css",
-    "map.js",
-    "map.css",
+    "engine.js",
+    "src",
+    "assets",
+    "theme.css",
     "cordis.patch.yml",
     "README.md"
   ],
   "scripts": {
-    "build": "node --check index.js && node --check client.js && node --check app.js && node --check map.js",
+    "build": "node --check index.js && node --check client.js && node --check engine.js && node --check canvas.js",
     "prepare": "pnpm run build",
     "test": "node --test test/*.test.js"
   },

@@ -1,7 +1,7 @@
 {
   "name": "dsh-flow",
   "version": "0.3.0",
-  "description": "One unified infinite canvas for DeepSeek Harness: conversation turns as a fork tree, agent teams as captain-member-task DAG clusters, and member messages rendered as a directed bubble stream in the inspector.",
+  "description": "DeepSeek Harness 的统一智能体画布：需求时间轴 + 多智能体团队层级编排一图呈现，成员立绘、按说话者编织的对话链、任务依赖 DAG，团队数据自有化存储。",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -40,5 +40,15 @@
       ],
       "immediately": false
     }
-  }
+  },
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "harness",
+    "canvas",
+    "multi-agent",
+    "agent-canvas",
+    "visualization",
+    "plugin"
+  ]
 }

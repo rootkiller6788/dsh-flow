@@ -2,6 +2,8 @@
 
 给 DeepSeek Harness 加一个**统一智能体画布**标签：会话时间轴与多智能体团队层级编排同处一图——用户需求轮在主时间轴，团队作为嵌套区域长在其下，每个成员一个子区域，装着ta的任务与发言卡；成员立绘、按说话者编织的对话链、任务依赖 DAG 一眼可读。
 
+![智能体画布：需求时间轴 + 团队层级编排 + 立绘检查器](assets/1.png)
+
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B7285?style=flat-square" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Node.js-%3E%3D22.19.0-3c873a?style=flat-square" alt="Node.js >= 22.19.0">

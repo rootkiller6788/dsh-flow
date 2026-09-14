@@ -45,3 +45,4 @@ export { looksLikeGateTestContract, sanitizeReviewObjective, sanitizeReviewAccep
 export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, parseProfileInvocation, resolveProfileTaskPlanning } from './profiles.js'
 export { TEAM_EVENT_TYPES, requiredEventFields, optionalEventFields, isTeamEvent, teamEvent, parseEventLog, serializeEventLog } from './events.js'
 export { projectTeam, replayTeam, taskAttempts, taskRollbacks } from './project.js'
+export { TEAM_SCHEMA_VERSION, isTeamManifest, createTeamManifest, parseTeamManifest, serializeTeamManifest, peekSchemaVersion } from './manifest.js'

@@ -1089,6 +1089,72 @@ for (const [label, a, b] of [
   }
 }
 
+// ---------------------------------------------------------------------------
+// Attempt generation changes
+// ---------------------------------------------------------------------------
+// The originals mint a uuid and read the clock, so every comparison normalises
+// both sides to placeholders. What is being checked is the set of fields each
+// operation writes and clears — which is the whole of its contract.
+{
+  const base = () => ({
+    id: 't1', subject: 's', status: 'pending', dependencies: [],
+    attempt: 2, attemptId: 'old-attempt', handoffId: 'old-handoff',
+    reassigning: true, output: 'previous', createdAt: 1, updatedAt: 1,
+  })
+  const PLACEHOLDER = 'NORMALISED'
+  const normalise = task => JSON.stringify({
+    ...task,
+    attemptId: task.attemptId === undefined ? undefined : PLACEHOLDER,
+    handoffId: task.handoffId === undefined ? undefined : PLACEHOLDER,
+    updatedAt: PLACEHOLDER,
+  })
+
+  let mismatches = 0
+  const compare = (label, runOriginal, runOurs) => {
+    const theirs = base()
+    const mine = base()
+    const theirReturn = runOriginal(theirs)
+    const ourReturn = runOurs(mine)
+    if (normalise(theirs) !== normalise(mine)) {
+      mismatches++
+      differ(`attempts [${label}]`, `original ${normalise(theirs)}\n      ours     ${normalise(mine)}`)
+    }
+    if ((theirReturn === undefined) !== (ourReturn === undefined)) {
+      mismatches++
+      differ(`attempts [${label}] return`, `original ${show(theirReturn)}, ours ${show(ourReturn)}`)
+    }
+  }
+
+  const at = 1_700_000_000_000
+  compare('activateTaskAttempt',
+    task => state.activateTaskAttempt(task, 'alice'),
+    task => ours.activateTaskAttempt(task, 'alice', { attemptId: 'id', now: at }))
+  compare('beginTaskAttempt',
+    task => state.beginTaskAttempt(task, 'alice'),
+    task => ours.beginTaskAttempt(task, 'alice', { attemptId: 'id', now: at }))
+  compare('cancelUnfinishedTask',
+    task => state.cancelUnfinishedTask(task, 'why'),
+    task => ours.cancelUnfinishedTask(task, 'why', at))
+  compare('invalidateTaskAttempt',
+    task => state.invalidateTaskAttempt(task, 'bob', false),
+    task => ours.invalidateTaskAttempt(task, 'bob', false, { handoffId: 'h', now: at }))
+
+  // A terminal task is not cancelled: there is no work to take back.
+  for (const status of ['completed', 'failed', 'cancelled']) {
+    const theirs = { ...base(), status }
+    const mine = { ...base(), status }
+    state.cancelUnfinishedTask(theirs, 'why')
+    ours.cancelUnfinishedTask(mine, 'why', at)
+    if (normalise(theirs) !== normalise(mine)) { mismatches++; differ(`cancelUnfinishedTask [${status}]`, 'differed') }
+    if (theirs.output !== 'previous' || mine.output !== 'previous') { mismatches++; differ(`cancelUnfinishedTask [${status}] output`, 'a terminal task must not receive the output') }
+  }
+
+  if (mismatches === 0) {
+    console.log('ok    attempt generation over 4 operations (uuid and clock normalised), terminal tasks not cancelled')
+    checks++
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

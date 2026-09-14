@@ -55,5 +55,6 @@ export { FALLBACK_FAILURE_CODES, isFallbackFailureCode, selectFallbackRoute, att
 export { DEFAULT_EFFORT_SENTINEL, resolveMemberRoute } from './model-route.js'
 export {
   DEPENDENCY_OUTPUT_MAX_CHARS, DEPENDENCY_OUTPUTS_TOTAL_MAX_CHARS,
-  ownedOpenTask, nextReadyTask, formatDependencyOutputs, fallbackMailboxPrompt, assignmentPrompt,
+  ownedOpenTask, nextReadyTask, formatDependencyOutputs, collectCompletedDependencyOutputs, fallbackMailboxPrompt, assignmentPrompt,
 } from './assignment.js'
+export { activateTaskAttempt, beginTaskAttempt, cancelUnfinishedTask, invalidateTaskAttempt } from './attempts.js'

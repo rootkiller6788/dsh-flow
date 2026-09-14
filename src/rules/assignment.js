@@ -72,6 +72,48 @@ export function formatDependencyOutputs(items) {
   return selected.join('\n')
 }
 
+/**
+ * Completed dependencies of one task, in dependency order, for its prompt.
+ *
+ * Order matters twice: the prompt lists them oldest-first, and
+ * `formatDependencyOutputs` trims from the front when the block is too long —
+ * so the caller's order decides which result survives.
+ *
+ * A dependency that is not completed contributes nothing. That is not a gap:
+ * `nextReadyTask` already refused to dispatch until every dependency completed,
+ * so anything missing here is a record that changed underneath the dispatch, and
+ * `onUnreadable` is where that becomes visible rather than silent.
+ *
+ * @param tasks - the team's tasks.
+ * @param taskId - the task being dispatched.
+ * @param onUnreadable - called with a message when a dependency looks wrong.
+ * @returns `{ id, subject, output?, profileSeedId? }` per completed dependency.
+ */
+export function collectCompletedDependencyOutputs(tasks, taskId, onUnreadable) {
+  const task = tasks.find(item => item.id === taskId)
+  if (task === undefined) {
+    onUnreadable?.(`dsh-flow: dispatch for unknown task "${taskId}"`)
+    return []
+  }
+  const byId = new Map(tasks.map(item => [item.id, item]))
+  const outputs = []
+  for (const dependencyId of task.dependencies) {
+    const dependency = byId.get(dependencyId)
+    if (dependency === undefined) {
+      onUnreadable?.(`dsh-flow: task "${taskId}" depends on missing task "${dependencyId}"`)
+      continue
+    }
+    if (dependency.status !== 'completed') continue
+    outputs.push({
+      id: dependency.id,
+      subject: dependency.subject,
+      ...dependency.output === undefined ? {} : { output: dependency.output },
+      ...dependency.profileSeedId === undefined ? {} : { profileSeedId: dependency.profileSeedId },
+    })
+  }
+  return outputs
+}
+
 /** Messages persisted while live delivery was unavailable, for one turn. */
 export function fallbackMailboxPrompt(messages) {
   return [

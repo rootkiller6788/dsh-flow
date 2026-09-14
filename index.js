@@ -121,6 +121,28 @@ async function atomicWrite(file, contents, options) {
   await rename(temporaryFile, file)
 }
 
+// Projection dedup index. `projectEventInto` used to ask "have I already stored
+// this seq?" by scanning `thread.messages` for every incoming event — O(messages)
+// per event, so O(n²) across a session's history (753 messages in a real store).
+// The answer only ever grows, so an index is the right shape.
+//
+// It is derived from the message list and lives in a WeakMap, which keeps it out
+// of two places it must not reach: the persisted JSON (the whole document is
+// rewritten on every save, so an index in there would be dead weight on disk)
+// and `structuredClone`, which drops non-enumerable properties anyway. The
+// message list's identity is checked on every use, so a wholesale replacement of
+// `thread.messages` — which the load path does when folding legacy cards —
+// invalidates the index instead of leaving it stale.
+const seqIndexes = new WeakMap()
+function seqIndexOf(thread) {
+  const cached = seqIndexes.get(thread)
+  if (cached !== undefined && cached.messages === thread.messages) return cached.seqs
+  const seqs = new Set()
+  for (const message of thread.messages) if (Number.isInteger(message.sourceSeq)) seqs.add(message.sourceSeq)
+  seqIndexes.set(thread, { messages: thread.messages, seqs })
+  return seqs
+}
+
 /**
  * Write while holding the lock, and report the two ways a second dsh web
  * instance becomes visible: it moved the file's mtime since our last write, or
@@ -596,7 +618,9 @@ export class WorkspaceStore {
       return
     }
     const projection = projectableEvent(event)
-    if (projection === null || thread.messages.some(message => message.sourceSeq === event.seq)) return
+    if (projection === null) return
+    const seen = seqIndexOf(thread)
+    if (seen.has(event.seq)) return
     const at = new Date(event.time).toISOString()
     const message = {
       id: randomUUID(),
@@ -615,6 +639,7 @@ export class WorkspaceStore {
     }
     this.attachPendingProcess(thread, message)
     thread.messages.push(message)
+    seen.add(event.seq)
     thread.updatedAt = at
     workspace.updatedAt = at
     if (thread.dshSessionTitle === null && projection.kind === 'user' && message.agent === undefined) {

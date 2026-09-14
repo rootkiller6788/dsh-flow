@@ -903,7 +903,24 @@ export function apply(ctx, config) {
     }
   }
   const redirect = location => (_req, res) => { res.writeHead(302, { location }); res.end() }
-  const file = (contentType, name) => async (_req, res) => { sendFile(res, contentType, await readFile(new URL(name, import.meta.url), 'utf8')) }
+  // Static files are read from disk once and cached by mtime: repeated page
+  // loads stop hitting the filesystem for every asset.
+  const staticCache = new Map()
+  const file = (contentType, name) => async (_req, res) => {
+    const path = new URL(name, import.meta.url)
+    let entry = staticCache.get(name)
+    try {
+      const mtimeMs = (await stat(path)).mtimeMs
+      if (entry === undefined || entry.mtimeMs !== mtimeMs) {
+        entry = { mtimeMs, body: await readFile(path) }
+        staticCache.set(name, entry)
+      }
+    } catch {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      return res.end('not found')
+    }
+    sendFile(res, contentType, entry.body.toString('utf8'))
+  }
   // Static pages are behind the same Host fence as the API: the DSH browser-trust
   // fence only covers /api, so a missing check here would expose these to
   // DNS-rebinding probes from a hostile origin.

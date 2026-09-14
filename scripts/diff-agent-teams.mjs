@@ -7,7 +7,9 @@
 // dependency, not a build one, so a clone without it self-skips (the shape DSH
 // uses for its own key-gated e2e tests).
 //
-// Usage:
+// The gate corpus is a systematic cross-product rather than a sample, so a full
+// run takes about a minute. This is an explicit command, not part of `pnpm test`.
+//
 //   node scripts/diff-agent-teams.mjs
 //   DSH_AGENT_TEAMS_DIR=/path/to/checkout node scripts/diff-agent-teams.mjs
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -423,6 +425,87 @@ for (const [label, a, b] of [
   if (mismatches === 0) {
     console.log(`ok    path scope over ${paths.length} paths × ${patterns.length} patterns, ${paths.length * scopes.length ** 2} classifications, ${statuses.length} git-status blobs`)
     checks++
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task-creation gate
+// ---------------------------------------------------------------------------
+// Systematic rather than random: every rule in validateCreateTask has a pass
+// and a fail path, and the corpus crosses the dimensions that separate them so
+// a missing branch shows up as a disagreement rather than as nothing at all.
+{
+  const task = (id, extra = {}) => ({
+    id, subject: `s-${id}`, status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1, ...extra,
+  })
+  const baseTeam = (tasks, extra = {}) => ({
+    name: 'T', id: 'T', captainSessionId: 'sess', createdAt: 1, members: [], tasks, taskSeq: tasks.length, ...extra,
+  })
+
+  const teams = [
+    ['plain', baseTeam([])],
+    ['halted', baseTeam([], { halted: true })],
+    ['halted with resume', baseTeam([], { halted: true, haltedAt: 5 })],
+    ['staged', baseTeam([], { phase: 'staged' })],
+    ['with failed task', baseTeam([task('t1', { status: 'failed' })])],
+    ['with open implementation', baseTeam([task('t1', { kind: 'implementation', status: 'in_progress', inScope: ['src/'], verify: ['npm test'], objective: 'o', acceptance: ['a'] })])],
+    ['with completed implementation', baseTeam([task('t1', { kind: 'implementation', status: 'completed', inScope: ['src/'], verify: ['v'], objective: 'o', acceptance: ['a'] })])],
+    ['requirements passed', baseTeam([task('t1', { kind: 'requirements', status: 'completed', verdict: 'pass', objective: 'o', acceptance: ['a'] })])],
+    ['requirements open', baseTeam([task('t1', { kind: 'requirements', status: 'in_progress', objective: 'o', acceptance: ['a'] })])],
+    ['requirements failed verdict', baseTeam([task('t1', { kind: 'requirements', status: 'completed', verdict: 'reject', objective: 'o', acceptance: ['a'] })])],
+    ['real team', realTeam()],
+  ].filter(([, team]) => team !== undefined)
+
+  const kinds = ['requirements', 'implementation', 'verification', 'review', 'repair', 'integration', 'work', undefined, 'bogus']
+  const scopes = [undefined, [], ['src/'], ['src/a.js'], [''], ['  ']]
+  const acceptances = [undefined, [], ['a'], ['', 'a']]
+  const objectives = [undefined, '', 'o', '   ']
+  const refs = [undefined, '', 't1', 'ghost']
+  const dependencySets = [[], ['t1'], ['ghost']]
+  const resumeFlags = [undefined, true, false]
+
+  let cases = 0
+  let mismatches = 0
+  for (const [teamLabel, team] of teams) {
+    for (const kind of kinds) {
+      for (const objective of objectives) {
+        for (const acceptance of acceptances) {
+          for (const inScope of scopes) {
+            for (const dependencySet of dependencySets) {
+              for (const reviewedTaskId of refs) {
+                for (const sourceTaskId of refs) {
+                  for (const resume of resumeFlags) {
+                    const input = {
+                      subject: 'x', kind, objective, acceptance, inScope,
+                      verify: inScope, dependencies: dependencySet,
+                      reviewedTaskId, sourceTaskId,
+                      sourceFindingIds: sourceTaskId === undefined ? undefined : ['f1'],
+                      resume, resumeReason: resume === true ? 'why' : '',
+                    }
+                    cases++
+                    const a = state.validateCreateTask(clone(team), clone(input))
+                    const b = ours.validateCreateTask(clone(team), clone(input))
+                    if (show(a) !== show(b)) {
+                      mismatches++
+                      if (mismatches <= 6) {
+                        differ(`validateCreateTask [${teamLabel}] kind=${kind} obj=${show(objective)} acc=${show(acceptance)} scope=${show(inScope)} deps=${show(dependencySet)} review=${show(reviewedTaskId)} src=${show(sourceTaskId)} resume=${resume}`,
+                          `original ${show(a).slice(0, 200)}\n      ours     ${show(b).slice(0, 200)}`)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (mismatches === 0) {
+    console.log(`ok    validateCreateTask over ${cases} team × input combinations (${teams.length} teams)`)
+    checks++
+  } else {
+    differ('validateCreateTask', `${mismatches} of ${cases} cases disagree`)
   }
 }
 

@@ -20,7 +20,7 @@
 
 export {
   TASK_STATUS, TERMINAL_TASK_STATUSES, TASK_KINDS, REVIEW_VERDICTS, FINDING_SEVERITIES,
-  MEMBER_STATUS, CAPTAIN_KEY, CAPTAIN_ASSIGNEE, MAILBOX_DELIVERY_LEASE_MS,
+  MEMBER_STATUS, CAPTAIN_KEY, CAPTAIN_ASSIGNEE, MAILBOX_DELIVERY_LEASE_MS, QUALITY_KINDS, WRITE_KINDS, OPEN_STATUSES,
   TASK_TRANSITIONS, transitionError,
 } from './constants.js'
 export { sha256Hex } from './sha256.js'
@@ -34,3 +34,4 @@ export {
 export { unsatisfiedDependencies, taskDepthsById, taskVisualState, danglingDependencies } from './dependencies.js'
 export { stripLeadingBom, isUnread, unreadMessages, claimDelivery, releaseDelivery, acknowledgeDelivery, mutateMailboxLines, parseMailboxLines } from './mailbox.js'
 export { PATH_CLASSIFICATIONS, normalizeWorkspacePath, pathMatchesScope, isDefaultExcluded, classifyChangedPath, collectChangedPaths, inScopeOverlap } from './paths.js'
+export { taskKindOf, isQualityKind, resolveReviewPolicy, dependencyClosureContains, validateCreateTask } from './gates.js'

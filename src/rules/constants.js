@@ -39,6 +39,17 @@ export const TASK_KINDS = Object.freeze([
   'requirements', 'implementation', 'verification', 'review', 'repair', 'integration', 'work',
 ])
 
+/** Kinds that carry the structured quality contract (`work` does not). */
+export const QUALITY_KINDS = Object.freeze([
+  'requirements', 'implementation', 'verification', 'review', 'repair', 'integration',
+])
+
+/** Kinds that touch files, and therefore declare and are held to a scope. */
+export const WRITE_KINDS = Object.freeze(['implementation', 'repair'])
+
+/** Statuses in which a task still occupies its scope and can be worked on. */
+export const OPEN_STATUSES = Object.freeze(['pending', 'claimed', 'in_progress'])
+
 /** Conclusion of a review / requirements task. Only `pass` may complete those kinds. */
 export const REVIEW_VERDICTS = Object.freeze(['pass', 'needs_revision', 'reject'])
 

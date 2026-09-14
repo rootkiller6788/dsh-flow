@@ -51,6 +51,13 @@ export const MEMBER_STATUS = Object.freeze(['idle', 'working', 'removed'])
 /** Mailbox key of the captain. */
 export const CAPTAIN_KEY = 'captain'
 
+/**
+ * How long a delivery lease holds before the message becomes retryable. A
+ * crashed live-delivery must not strand its message forever, and there is no
+ * timer anywhere: expiry is evaluated lazily wherever unread mail is read.
+ */
+export const MAILBOX_DELIVERY_LEASE_MS = 60_000
+
 /** Placeholder assignee meaning "the captain owns this task". */
 export const CAPTAIN_ASSIGNEE = 'captain'
 

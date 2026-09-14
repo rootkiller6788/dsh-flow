@@ -252,6 +252,105 @@ for (const [label, a, b] of [
   checks++
 }
 
+// ---------------------------------------------------------------------------
+// Mailbox: the delivery lease
+// ---------------------------------------------------------------------------
+// The original reads the clock itself, so a case sitting exactly on the lease
+// boundary would flip on a millisecond of drift and prove nothing. Cases are
+// chosen far from that boundary and compared against the original through its
+// own IO entry point; the boundary itself is asserted against the rule.
+{
+  const live = Date.now()
+  const message = (id, extra = {}) => ({ id, from: 'captain', to: '建模手', content: `c-${id}`, ts: live - 1000, ...extra })
+
+  const boxes = {
+    'all unread': [message('m1'), message('m2'), message('m3')],
+    'one read': [message('m1'), message('m2', { readAt: live - 10 }), message('m3')],
+    'fresh lease holds': [message('m1', { deliveryClaimedAt: live - 1000 }), message('m2')],
+    'stale lease expired': [message('m1', { deliveryClaimedAt: live - 120_000 })],
+    'claimed and read': [message('m1', { deliveryClaimedAt: live - 5000, readAt: live - 4000 })],
+    'delivered but unread': [message('m1', { deliveredAt: live - 4000 })],
+    'empty': [],
+  }
+
+  const root = join(scratch, 'inbox')
+  let mismatches = 0
+  for (const [label, messages] of Object.entries(boxes)) {
+    const dir = join(root, 't', 'inbox')
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'captain.jsonl'), `${messages.map(m => JSON.stringify(m)).join('\n')}\n`)
+    const expected = (await state.readUnreadMailbox(root, 't', 'captain')).map(m => m.id)
+    const actual = ours.unreadMessages(messages, Date.now()).map(m => m.id)
+    if (show(expected) !== show(actual)) { mismatches++; console.error(`FAIL  unread [${label}] ${show(expected)} vs ${show(actual)}`) }
+  }
+
+  // The boundary the original cannot be asked about without racing its clock.
+  const LEASE = ours.MAILBOX_DELIVERY_LEASE_MS
+  const at = boundary => ours.unreadMessages([message('m', { deliveryClaimedAt: boundary })], live).length === 1
+  // Exactly at the lease the message becomes unread again; one millisecond
+  // younger it is still held, one millisecond older it is already released.
+  const boundaryHolds = at(live - LEASE) && !at(live - LEASE + 1) && at(live - LEASE - 1)
+  if (mismatches === 0 && boundaryHolds) {
+    console.log(`ok    unread lease over ${Object.keys(boxes).length} mailboxes, plus the exact ${LEASE}ms boundary`)
+  } else {
+    if (!boundaryHolds) differ('lease boundary', `expected unread at exactly ${LEASE}ms elapsed and not before`)
+    failures++
+  }
+  checks++
+}
+
+// ---------------------------------------------------------------------------
+// Mailbox: the line-preserving rewrite
+// ---------------------------------------------------------------------------
+// Run the original's own mutators against a real file, then compare the file it
+// wrote with what our pure transform produces from the same input. Timestamps
+// minted inside the original are normalised on both sides.
+{
+  const live = Date.now()
+  const message = (id, extra = {}) => ({ id, from: 'captain', to: '建模手', content: `c-${id}`, ts: live - 1000, ...extra })
+  const rawBox = [
+    JSON.stringify(message('m1')),
+    'not json at all',
+    JSON.stringify(message('m2', { readAt: live - 100 })),
+    '',
+    JSON.stringify(message('m3', { deliveryClaimedAt: live - 500 })),
+    '{"id":"m4"',
+  ].join('\n')
+
+  const normalise = text => text.replace(/\b17\d{11}\b/g, 'TS-NOW')
+  const results = []
+
+  const run = async (label, ids, original, mutator) => {
+    const dir = join(scratch, 'rw', label, 'inbox')
+    rmSync(join(scratch, 'rw', label), { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'captain.jsonl'), rawBox)
+    await original(join(scratch, 'rw'), label, 'captain', ids)
+    const theirs = normalise(readFileSync(join(dir, 'captain.jsonl'), 'utf8'))
+    const mine = normalise(ours.mutateMailboxLines(rawBox, ids, mutator))
+    results.push([label, theirs, mine])
+  }
+
+  await run('claim', ['m1', 'm3'], state.claimMailboxDelivery, m => ours.claimDelivery(m, live))
+  await run('release', ['m3'], state.releaseMailboxDelivery, m => ours.releaseDelivery(m))
+  await run('ack', ['m1'], state.acknowledgeMailbox, m => ours.acknowledgeDelivery(m, live))
+  await run('no ids', [], state.claimMailboxDelivery, m => ours.claimDelivery(m, live))
+  await run('unknown id', ['nope'], state.claimMailboxDelivery, m => ours.claimDelivery(m, live))
+
+  let mismatches = 0
+  for (const [label, theirs, mine] of results) {
+    if (theirs !== mine) {
+      mismatches++
+      differ(`mailbox rewrite [${label}]`, `original ${JSON.stringify(theirs).slice(0, 170)}\n      ours     ${JSON.stringify(mine).slice(0, 170)}`)
+    }
+  }
+  if (mismatches === 0) {
+    console.log(`ok    mailbox rewrite over ${results.length} mutations (malformed and unselected lines survive verbatim)`)
+    checks++
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

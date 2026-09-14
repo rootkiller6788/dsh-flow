@@ -351,6 +351,81 @@ for (const [label, a, b] of [
   }
 }
 
+// ---------------------------------------------------------------------------
+// Workspace path scope
+// ---------------------------------------------------------------------------
+{
+  const paths = [
+    'src/a.js', 'src/deep/b.js', './src/a.js', 'src//a.js', 'src/./a.js', 'src\\a.js',
+    '  src/a.js  ', '', '   ', '.', './', '/abs/path', '~/home', 'C:/drive', 'c:\\drive',
+    '../escape', 'src/../../etc/passwd', '.git/config', '.dsh/state', 'app/.env', '.env.local',
+    'config/secrets/key.txt', 'id_rsa', 'id_rsa.pub', 'secrets', 'a/b/secrets/c',
+    'src/', 'src', '.hidden/file', '中文/文件.js', 'a b/c d.js',
+  ]
+  const patterns = ['.', './', 'src', 'src/', 'src/a.js', './src', 'src/deep/', '', '   ', '/abs', '~', 'C:/x', '../up', 'a/b/secrets/c', '.env']
+
+  let mismatches = 0
+  const mismatch = (label, a, b) => { mismatches++; console.error(`FAIL  ${label} ${show(a)} vs ${show(b)}`) }
+
+  for (const path of paths) {
+    if (show(gates.normalizeWorkspacePath(path)) !== show(ours.normalizeWorkspacePath(path))) {
+      mismatch(`normalizeWorkspacePath(${JSON.stringify(path)})`, gates.normalizeWorkspacePath(path), ours.normalizeWorkspacePath(path))
+    }
+    for (const pattern of patterns) {
+      if (gates.pathMatchesScope(path, pattern) !== ours.pathMatchesScope(path, pattern)) {
+        mismatch(`pathMatchesScope(${JSON.stringify(path)}, ${JSON.stringify(pattern)})`, gates.pathMatchesScope(path, pattern), ours.pathMatchesScope(path, pattern))
+      }
+    }
+  }
+
+  const scopes = [[], ['src/'], ['src/a.js'], ['.'], ['.env'], ['secrets']]
+  for (const path of paths) {
+    for (const inScope of scopes) {
+      for (const outOfScope of scopes) {
+        const a = gates.classifyChangedPath(path, inScope, outOfScope)
+        const b = ours.classifyChangedPath(path, inScope, outOfScope)
+        if (a !== b) mismatch(`classifyChangedPath(${JSON.stringify(path)}, ${show(inScope)}, ${show(outOfScope)})`, a, b)
+      }
+    }
+  }
+
+  const statuses = [
+    ' M src/a.js',
+    'M  src/b.js\nA  src/c.js',
+    '?? new.txt',
+    'R  old.js -> src/new.js',
+    ' D gone.js',
+    'MM both.js',
+    'UU conflict.js',
+    ' M "quoted name.js"',
+    ' M ../outside.js',
+    ' M C:/abs.js',
+    ' M src/a.js\n M src/a.js',
+    '', '   ', '\n\n', 'garbage line without status', ' M .env',
+  ]
+  for (const text of statuses) {
+    if (show(gates.collectChangedPaths(text)) !== show(ours.collectChangedPaths(text))) {
+      mismatch(`collectChangedPaths(${JSON.stringify(text).slice(0, 40)})`, gates.collectChangedPaths(text), ours.collectChangedPaths(text))
+    }
+  }
+
+  const overlapCases = [
+    [['src/'], ['src/a.js']], [['src/a.js'], ['src/']], [['src/'], ['lib/']],
+    [['.'], ['src/a.js']], [[], ['src/']], [undefined, ['src/']], [['src/'], undefined],
+    [['a', 'b'], ['b', 'c']],
+  ]
+  for (const [left, right] of overlapCases) {
+    if (show(gates.inScopeOverlap(left, right)) !== show(ours.inScopeOverlap(left, right))) {
+      mismatch(`inScopeOverlap(${show(left)}, ${show(right)})`, gates.inScopeOverlap(left, right), ours.inScopeOverlap(left, right))
+    }
+  }
+
+  if (mismatches === 0) {
+    console.log(`ok    path scope over ${paths.length} paths × ${patterns.length} patterns, ${paths.length * scopes.length ** 2} classifications, ${statuses.length} git-status blobs`)
+    checks++
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

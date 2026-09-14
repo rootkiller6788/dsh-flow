@@ -33,3 +33,4 @@ export {
 } from './entities.js'
 export { unsatisfiedDependencies, taskDepthsById, taskVisualState, danglingDependencies } from './dependencies.js'
 export { stripLeadingBom, isUnread, unreadMessages, claimDelivery, releaseDelivery, acknowledgeDelivery, mutateMailboxLines, parseMailboxLines } from './mailbox.js'
+export { PATH_CLASSIFICATIONS, normalizeWorkspacePath, pathMatchesScope, isDefaultExcluded, classifyChangedPath, collectChangedPaths, inScopeOverlap } from './paths.js'

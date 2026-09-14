@@ -733,6 +733,106 @@ for (const [label, a, b] of [
   checks++
 }
 
+// ---------------------------------------------------------------------------
+// Review/repair loop planning
+// ---------------------------------------------------------------------------
+{
+  const finding = (id, extra = {}) => ({ id, severity: 'medium', problem: `p-${id}`, requiredFix: `fix-${id}`, ...extra })
+  const task = (id, kind, status, extra = {}) => ({ id, subject: `s-${id}`, kind, status, dependencies: [], createdAt: 1, updatedAt: 1, ...extra })
+  const member = (name, status = 'idle') => ({ id: `m-${name}`, name, joinedAt: 1, status })
+  const team = (tasks, extra = {}) => ({
+    name: 'T', id: 'T', captainSessionId: 's', createdAt: 1, taskSeq: tasks.length, members: [member('a'), member('b')], tasks, ...extra,
+  })
+
+  const closedVariants = []
+  const addClosed = (label, value) => closedVariants.push([label, value])
+  for (const kind of ['review', 'requirements', 'implementation', undefined]) {
+    for (const status of ['failed', 'completed', 'in_progress']) {
+      for (const verdict of [undefined, 'pass', 'needs_revision', 'reject']) {
+        addClosed(`${kind}/${status}/${verdict}`, task('c1', kind, status, {
+          verdict, round: 1, reviewedTaskId: 't1', assignee: 'a',
+          findings: [finding('f1'), finding('f2', { resolved: true })],
+          objective: 'review it', acceptance: ['one thing'],
+        }))
+      }
+    }
+  }
+  addClosed('no findings', task('c1', 'review', 'failed', { verdict: 'needs_revision', round: 1, reviewedTaskId: 't1' }))
+  addClosed('findings with files', task('c1', 'review', 'failed', {
+    verdict: 'needs_revision', round: 1, reviewedTaskId: 't1', assignee: 'a',
+    findings: [finding('f1', { file: 'src/a.js' }), finding('f2', { file: 'src/b.js' })],
+  }))
+  addClosed('findings partly resolved', task('c1', 'review', 'failed', {
+    verdict: 'needs_revision', round: 1, reviewedTaskId: 't1',
+    findings: [finding('f1', { resolved: true }), finding('f2')],
+  }))
+  addClosed('gate-echoing objective', task('c1', 'review', 'failed', {
+    verdict: 'needs_revision', round: 1, reviewedTaskId: 't1',
+    objective: 'trigger the 拒绝路径 for this gate', acceptance: ['verdict=needs_revision'],
+    findings: [finding('f1')],
+  }))
+  addClosed('no source id', task('c1', 'review', 'failed', { verdict: 'needs_revision', round: 1 }))
+  addClosed('no round', task('c1', 'requirements', 'failed', { verdict: 'needs_revision', findings: [finding('f1')] }))
+
+  const sources = [
+    ['source exists', [task('t1', 'implementation', 'in_progress', { assignee: 'a', inScope: ['src/'], verify: ['v'], objective: 'build it' })]],
+    ['source missing', []],
+    ['source unassigned', [task('t1', 'implementation', 'in_progress', { inScope: ['src/'] })]],
+  ]
+  const memberSets = [
+    ['two members', [member('a'), member('b')]],
+    ['one removed', [member('a'), member('b', 'removed')]],
+    ['none', []],
+    ['captain only', [member('captain')]],
+  ]
+  const policies = [
+    ['default policy', undefined],
+    ['codeMaxRounds 1', { codeMaxRounds: 1 }],
+    ['codeMaxRounds 9, maxRepairAttempts 1', { codeMaxRounds: 9, maxRepairAttempts: 1 }],
+    ['requirementsMaxRounds 1', { requirementsMaxRounds: 1 }],
+  ]
+  const preexisting = [
+    ['none', []],
+    ['open repair for same findings', [task('r0', 'repair', 'pending', { sourceTaskId: 't1', sourceFindingIds: ['f1', 'f2'] })]],
+    ['open repair for other findings', [task('r0', 'repair', 'pending', { sourceTaskId: 't1', sourceFindingIds: ['zzz'] })]],
+    ['completed repairs at the limit', [
+      task('r0', 'repair', 'completed', { sourceTaskId: 't1', sourceFindingIds: ['f1', 'f2'] }),
+      task('r1', 'repair', 'completed', { sourceTaskId: 't1', sourceFindingIds: ['f1', 'f2'] }),
+    ]],
+    ['repair reordered findings', [task('r0', 'repair', 'pending', { sourceTaskId: 't1', sourceFindingIds: ['f2', 'f1'] })]],
+  ]
+
+  let cases = 0
+  let mismatches = 0
+  for (const [closedLabel, closed] of closedVariants) {
+    for (const [sourceLabel, sourceTasks] of sources) {
+      for (const [memberLabel, members] of memberSets) {
+        for (const [policyLabel, reviewPolicy] of policies) {
+          for (const [preLabel, preTasks] of preexisting) {
+            cases++
+            const value = { ...team([...sourceTasks, ...preTasks, closed], { members, reviewPolicy }) }
+            const a = gates.planQualityFollowUp(clone(value), clone(closed))
+            const b = ours.planQualityFollowUp(clone(value), clone(closed))
+            if (show(a) !== show(b)) {
+              mismatches++
+              if (mismatches <= 6) {
+                differ(`planQualityFollowUp [${closedLabel}] [${sourceLabel}] [${memberLabel}] [${policyLabel}] [${preLabel}]`,
+                  `original ${show(a).slice(0, 220)}\n      ours     ${show(b).slice(0, 220)}`)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (mismatches === 0) {
+    console.log(`ok    planQualityFollowUp over ${cases} cases (round ceilings, repair limits, gate echo, assignee choice)`)
+    checks++
+  } else {
+    differ('planQualityFollowUp', `${mismatches} of ${cases} cases disagree`)
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

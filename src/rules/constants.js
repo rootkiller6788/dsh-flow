@@ -50,6 +50,26 @@ export const WRITE_KINDS = Object.freeze(['implementation', 'repair'])
 /** Statuses in which a task still occupies its scope and can be worked on. */
 export const OPEN_STATUSES = Object.freeze(['pending', 'claimed', 'in_progress'])
 
+/** Acceptance criteria a review task falls back to when it declared none. */
+export const DEFAULT_REVIEW_ACCEPTANCE = Object.freeze([
+  'The latest implementation meets the user goal',
+  'No unresolved blocker or high findings',
+])
+
+/** Objective a review task falls back to when it declared none. */
+export const DEFAULT_REVIEW_OBJECTIVE = 'Review whether the latest implementation satisfies the user goal'
+
+/**
+ * Text that reads as the *test* of a rejection path rather than as a real
+ * objective or criterion. Models occasionally echo a gate's own wording into
+ * the field the gate reads, which would make the gate "pass" against its own
+ * example text — so such values are replaced with the default instead.
+ */
+export const GATE_TEST_CONTRACT = /needs[_ ]revision|拒绝路径|verdict\s*=\s*needs_revision|cannot complete|不能完成|触发拒绝/iu
+
+/** Statuses in which a planned follow-up is already scheduled and will run. */
+export const OPEN_FOLLOW_UP_STATUSES = Object.freeze(['pending', 'claimed', 'in_progress'])
+
 /** Conclusion of a review / requirements task. Only `pass` may complete those kinds. */
 export const REVIEW_VERDICTS = Object.freeze(['pass', 'needs_revision', 'reject'])
 

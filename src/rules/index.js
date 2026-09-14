@@ -21,6 +21,7 @@
 export {
   TASK_STATUS, TERMINAL_TASK_STATUSES, TASK_KINDS, REVIEW_VERDICTS, FINDING_SEVERITIES,
   MEMBER_STATUS, CAPTAIN_KEY, CAPTAIN_ASSIGNEE, MAILBOX_DELIVERY_LEASE_MS, QUALITY_KINDS, WRITE_KINDS, OPEN_STATUSES,
+  DEFAULT_REVIEW_ACCEPTANCE, DEFAULT_REVIEW_OBJECTIVE, OPEN_FOLLOW_UP_STATUSES,
   TASK_TRANSITIONS, transitionError,
 } from './constants.js'
 export { sha256Hex } from './sha256.js'
@@ -38,3 +39,4 @@ export { taskKindOf, isQualityKind, resolveReviewPolicy, dependencyClosureContai
 export { openHighFindings, acceptanceCovered, verifyCovered, evaluateQualityCompletion } from './completion.js'
 export { canDeclareDelivery, resumeTeamState, describeQualityLoop } from './delivery.js'
 export { buildCoverageMatrix } from './coverage.js'
+export { looksLikeGateTestContract, sanitizeReviewObjective, sanitizeReviewAcceptance, unresolvedFindings, findingKey, schedulableAssignee, countRepairAttempts, hasOpenFollowUp, planQualityFollowUp } from './followup.js'

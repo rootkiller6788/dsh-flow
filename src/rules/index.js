@@ -51,3 +51,4 @@ export {
   roleInTeam, deniedToolsFor, isMemberRole, promptForRole,
   FLOW_ACTIVATION_PROMPT, FLOW_MEMBER_PROMPT,
 } from './tool-names.js'
+export { FALLBACK_FAILURE_CODES, isFallbackFailureCode, selectFallbackRoute, attemptFailureEvents } from './fallback.js'

@@ -1187,7 +1187,7 @@ function canvasPage() {
 // Deliberately explicit — this list is also the serve allowlist, so it must not
 // be auto-widened. The cost is that adding a module means adding it here too;
 // forgetting silently 404s the import and the canvas never boots.
-const CANVAS_SRC_FILES = ['rules/index.js', 'rules/constants.js', 'rules/sha256.js', 'rules/identifiers.js', 'rules/entities.js', 'rules/dependencies.js', 'rules/mailbox.js', 'rules/paths.js', 'rules/gates.js', 'rules/completion.js', 'rules/delivery.js', 'rules/coverage.js', 'rules/followup.js', 'rules/profiles.js', 'rules/events.js', 'rules/project.js', 'rules/manifest.js', 'rules/tool-names.js', 'core.js', 'html.js', 'markdown.js', 'relay.js', 'session.js', 'teams.js', 'scene.js', 'view.js', 'actions.js', 'canvas.js', 'artwork.js']
+const CANVAS_SRC_FILES = ['rules/index.js', 'rules/constants.js', 'rules/sha256.js', 'rules/identifiers.js', 'rules/entities.js', 'rules/dependencies.js', 'rules/mailbox.js', 'rules/paths.js', 'rules/gates.js', 'rules/completion.js', 'rules/delivery.js', 'rules/coverage.js', 'rules/followup.js', 'rules/profiles.js', 'rules/events.js', 'rules/project.js', 'rules/manifest.js', 'rules/tool-names.js', 'rules/fallback.js', 'core.js', 'html.js', 'markdown.js', 'relay.js', 'session.js', 'teams.js', 'scene.js', 'view.js', 'actions.js', 'canvas.js', 'artwork.js']
 
 /**
  * Mount the dsh-flow routes on the existing DSH Web Server: the unified canvas

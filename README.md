@@ -173,7 +173,7 @@ dsh-flow (纯 JS，无运行时依赖)
 
 | 位置 | 内容 |
 | --- | --- |
-| `<DSH home>/flow/workspaces.json`（+ `.lock`） | 工作区 / 节点 / 投影消息；**只支持单实例写入** |
+| `<DSH home>/flow/workspaces.json`（+ `.lock`） | 工作区 / 节点 / 投影消息，gzip 压缩存放（明文 JSON 也能读）；**只支持单实例写入** |
 | `<DSH home>/flow/teams.json` | 团队快照（成员 / 任务 / 依赖 / 收件箱） |
 | `dsh-flow:map-card-positions:v3` | 会话卡坐标（与旧版画布兼容） |
 | `dsh-flow:cluster-positions:v1` | 团队区域卡片坐标 |

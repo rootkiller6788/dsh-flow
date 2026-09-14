@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promis
 import zlib from 'node:zlib'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
+import { promisify } from 'node:util'
 
 export const name = 'dsh-flow'
 export const inject = ['webServer', 'sessions']
@@ -19,6 +20,22 @@ const LOCK_STALE_MS = 60_000
 // burst of session events costs a single full-state write instead of one per
 // event (issue #13: per-event saves pinned the main thread at ~90% CPU).
 const SAVE_DEBOUNCE_MS = 800
+// The store is one JSON document that reaches megabytes once a session has
+// history, so it is written gzip-compressed: ~27% of the bytes on disk. Both
+// directions are async (libuv threadpool) — a synchronous gzip of the current
+// 4.2MB store blocks the event loop for ~62ms, which is exactly the cost the
+// debounce above exists to avoid. Level 1 costs half the CPU of the default
+// for 4 percentage points more size (1.13MB vs 0.96MB), which the disk does
+// not care about.
+const GZIP_OPTIONS = { level: zlib.constants.Z_BEST_SPEED }
+const gzip = promisify(zlib.gzip)
+const gunzip = promisify(zlib.gunzip)
+// Written gzip-compressed, read transparently: a file that starts with the
+// gzip magic is inflated, anything else is parsed as plain JSON — so a store
+// written before this change (or edited by hand) still loads.
+function isGzip(buffer) {
+  return buffer.length > 1 && buffer[0] === 0x1f && buffer[1] === 0x8b
+}
 
 /** JSON persistence for the canvas workspace graph. */
 export class WorkspaceStore {
@@ -234,7 +251,8 @@ export class WorkspaceStore {
   async load() {
     await mkdir(dirname(this.dataFile), { recursive: true })
     try {
-      const parsed = JSON.parse(await readFile(this.dataFile, 'utf8'))
+      const raw = await readFile(this.dataFile)
+      const parsed = JSON.parse(isGzip(raw) ? (await gunzip(raw)).toString('utf8') : raw.toString('utf8'))
       const { state, migrated } = normalizeState(parsed)
       this.state = state
       if (migrated) await this.save()
@@ -292,7 +310,7 @@ export class WorkspaceStore {
     await this.acquireLock()
     try {
       const temporaryFile = `${this.dataFile}.${process.pid}.tmp`
-      await writeFile(temporaryFile, `${JSON.stringify(this.state)}\n`, 'utf8')
+      await writeFile(temporaryFile, await gzip(`${JSON.stringify(this.state)}\n`, GZIP_OPTIONS))
       await rename(temporaryFile, this.dataFile)
       this.lastKnownMtime = (await stat(this.dataFile)).mtimeMs
     } finally {

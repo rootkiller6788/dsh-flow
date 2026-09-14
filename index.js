@@ -1345,7 +1345,12 @@ export function apply(ctx, config) {
     const mtimeMs = (await stat(path)).mtimeMs
     if (cached !== undefined && cached.mtimeMs === mtimeMs) return cached
     const body = await readFile(path)
-    const entry = { mtimeMs, body, gzip: compress ? zlib.gzipSync(body) : null }
+    // Async: gzipSync blocked the event loop for the whole compression, and this
+    // runs on the request path the first time each file is asked for (and again
+    // whenever one changes). The win is small in absolute terms — the text
+    // assets total ~155KB — but it is the same "keep the main thread free" rule
+    // the write path already follows.
+    const entry = { mtimeMs, body, gzip: compress ? await gzip(body) : null }
     staticCache.set(key, entry)
     return entry
   }

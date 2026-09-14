@@ -25,3 +25,9 @@ export {
 } from './constants.js'
 export { sha256Hex } from './sha256.js'
 export { MAX_KEY_LENGTH, keyDigest, sanitizeKey } from './identifiers.js'
+export {
+  isReviewPolicy, isReviewFinding, isAcceptanceResult, isCommandResult,
+  normalizeBlankOptionalTaskFields, hasValidQualityTaskFields,
+  isTeamMember, isTeamProfileSnapshot, coerceProfileSnapshot,
+  isTeamTask, isTeamState, isTeamMessage, coerceTeamState,
+} from './entities.js'

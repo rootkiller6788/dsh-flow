@@ -54,6 +54,18 @@ export const CAPTAIN_KEY = 'captain'
 /** Placeholder assignee meaning "the captain owns this task". */
 export const CAPTAIN_ASSIGNEE = 'captain'
 
+/**
+ * Review-loop limits used when a team's profile states no policy. These are the
+ * defaults a profile copies, not plugin configuration — a team's own
+ * `reviewPolicy` field wins wherever it is present.
+ */
+export const DEFAULT_REVIEW_POLICY = Object.freeze({
+  requirementsMinRounds: 1,
+  requirementsMaxRounds: 4,
+  codeMaxRounds: 3,
+  maxRepairAttempts: 2,
+})
+
 
 // ---------------------------------------------------------------------------
 // Transition rules

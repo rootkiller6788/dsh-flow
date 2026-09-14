@@ -24,7 +24,8 @@
   "scripts": {
     "build": "node scripts/check.js",
     "prepare": "pnpm run build",
-    "test": "node --test"
+    "test": "node --test",
+    "test:diff": "node scripts/diff-agent-teams.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

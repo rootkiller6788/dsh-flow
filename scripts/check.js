@@ -18,7 +18,7 @@ function walk(directory) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) return []
     const path = join(directory, entry.name)
     if (entry.isDirectory()) return walk(path)
-    return entry.name.endsWith('.js') ? [path] : []
+    return /\.m?js$/.test(entry.name) ? [path] : []
   })
 }
 

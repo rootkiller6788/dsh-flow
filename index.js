@@ -1,4 +1,7 @@
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+// Synchronous twins, used by the teardown flush: process 'exit' and a plugin
+// unload will not wait for a promise.
+import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import zlib from 'node:zlib'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
@@ -45,6 +48,25 @@ function isGzip(buffer) {
   return buffer.length > 1 && buffer[0] === 0x1f && buffer[1] === 0x8b
 }
 
+/**
+ * Whether a lock file's contents/mtime mean the lock can be broken. Split out
+ * from the async `lockIsStale` so the teardown flush — which may only use
+ * synchronous IO — reaches the same verdict instead of growing a second copy of
+ * this rule. An empty/garbled pid counts as stale only once the file is old.
+ */
+function lockIsStaleFrom(content, mtimeMs) {
+  const tooOld = Date.now() - mtimeMs > LOCK_STALE_MS
+  const pid = Number.parseInt(content, 10)
+  if (!Number.isInteger(pid)) return tooOld
+  if (pid === process.pid) return false
+  try {
+    process.kill(pid, 0)
+    return tooOld
+  } catch {
+    return true
+  }
+}
+
 /** JSON persistence for the canvas workspace graph. */
 export class WorkspaceStore {
   constructor(dataFile) {
@@ -57,6 +79,7 @@ export class WorkspaceStore {
     this.externalModWarned = false
     this.lockWarned = false
     this.dirty = false
+    this.exitHandler = null
     this.flushTimer = null
   }
 
@@ -330,6 +353,68 @@ export class WorkspaceStore {
     try { return (await stat(this.dataFile)).mtimeMs } catch { return null }
   }
 
+  /**
+   * Synchronous flush for teardown. The debounce above holds up to
+   * SAVE_DEBOUNCE_MS of changes in memory, and neither process 'exit' nor a
+   * plugin unload waits for a promise — so without this, stopping the host
+   * during that window drops the last writes silently.
+   *
+   * Deliberately plain JSON, not gzip: the goal here is to finish quickly, and
+   * `load()` detects the format by magic bytes, so the next normal save
+   * re-compresses it.
+   */
+  flushSync() {
+    if (!this.dirty || this.state === undefined) return false
+    const lockFile = `${this.dataFile}.lock`
+    try {
+      writeFileSync(lockFile, `${process.pid}\n`, { flag: 'wx' })
+    } catch {
+      // Only break a lock whose owner is demonstrably gone; a live holder means
+      // another instance is writing, and overwriting it is precisely the
+      // clobber the lock exists to prevent.
+      let breakable = false
+      try { breakable = lockIsStaleFrom(readFileSync(lockFile, 'utf8'), statSync(lockFile).mtimeMs) } catch { breakable = false }
+      if (!breakable) {
+        process.stderr.write('dsh-flow: 另一个 dsh web 实例正持有写锁，本次退出未保存的改动已丢弃——请只运行一个实例\n')
+        return false
+      }
+      // Breaking a stale lock means removing it first — 'wx' would just fail
+      // again against the file still sitting there. (The async acquireLock does
+      // the same unlink; leaving it out here silently disabled the whole path.)
+      try { unlinkSync(lockFile) } catch { /* raced with another writer */ }
+      try { writeFileSync(lockFile, `${process.pid}\n`, { flag: 'wx' }) } catch {
+        process.stderr.write('dsh-flow: 退出时未能取得写锁，本次未保存的改动已丢弃\n')
+        return false
+      }
+    }
+    try {
+      const temporaryFile = `${this.dataFile}.${process.pid}.tmp`
+      writeFileSync(temporaryFile, `${JSON.stringify(this.state)}\n`)
+      renameSync(temporaryFile, this.dataFile)
+      this.dirty = false
+      this.lastKnownMtime = statSync(this.dataFile).mtimeMs
+      return true
+    } catch (error) {
+      process.stderr.write(`dsh-flow: 退出时保存失败——${error.message}\n`)
+      return false
+    } finally {
+      try { unlinkSync(lockFile) } catch { /* already gone */ }
+    }
+  }
+
+  /** Flush the debounced window when the process exits. Idempotent. */
+  watchExit() {
+    if (this.exitHandler !== null) return
+    this.exitHandler = () => { this.flushSync() }
+    process.once('exit', this.exitHandler)
+  }
+
+  unwatchExit() {
+    if (this.exitHandler === null) return
+    process.removeListener('exit', this.exitHandler)
+    this.exitHandler = null
+  }
+
   /** Take an exclusive cross-process lock, breaking a stale one; warn when a live process holds it. */
   async acquireLock() {
     const lockFile = `${this.dataFile}.lock`
@@ -357,16 +442,7 @@ export class WorkspaceStore {
   async lockIsStale(lockFile) {
     try {
       const [content, stats] = await Promise.all([readFile(lockFile, 'utf8'), stat(lockFile)])
-      const tooOld = Date.now() - stats.mtimeMs > LOCK_STALE_MS
-      const pid = Number.parseInt(content, 10)
-      if (!Number.isInteger(pid)) return tooOld
-      if (pid === process.pid) return false
-      try {
-        process.kill(pid, 0)
-        return tooOld
-      } catch {
-        return true
-      }
+      return lockIsStaleFrom(content, stats.mtimeMs)
     } catch {
       return false
     }
@@ -861,6 +937,14 @@ const CANVAS_SRC_FILES = ['core.js', 'markdown.js', 'relay.js', 'session.js', 't
  */
 export function apply(ctx, config) {
   const store = new WorkspaceStore(config?.dataFile)
+  // Two teardown paths, because they cover different exits: the process 'exit'
+  // handler catches process.exit() (and the end of a drained event loop), while
+  // the effect cleanup catches the host disposing just this plugin. Both flush
+  // the debounced window synchronously — an async flush would be cut short.
+  ctx.effect(() => {
+    store.watchExit()
+    return () => { store.unwatchExit(); store.flushSync() }
+  }, 'dsh-flow: flush the debounced write on teardown')
   const teamsFile = join(dirname(config?.dataFile ?? '.'), 'teams.json')
   const autoProjection = config?.autoProjection !== false
   const projectionWorkspaceTitle = typeof config?.projectionWorkspaceTitle === 'string' && config.projectionWorkspaceTitle.trim() !== ''

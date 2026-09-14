@@ -56,8 +56,18 @@ function resolveFrom(importer, specifier) {
   return parts.join('/')
 }
 
+// Some src modules are host-only and must NOT be served: they exist for the
+// Node side and have no business reaching a browser. The allowlist is a serve
+// boundary, so "forgot to add it" and "added it by mistake" are both failures,
+// in opposite directions.
+const SERVER_ONLY_PREFIXES = ['runner/']
+
 const problems = []
 for (const [name, module] of modules) {
+  if (SERVER_ONLY_PREFIXES.some(prefix => name.startsWith(prefix))) {
+    if (served.has(name)) problems.push(`src/${name} is host-only and must not be served to the canvas`)
+    continue
+  }
   if (!served.has(name)) problems.push(`src/${name} is not in CANVAS_SRC_FILES (import would 404)`)
   for (const [, specifier] of module.matchAll(/from '(\.[^']+)'/g)) {
     const target = resolveFrom(name, specifier)

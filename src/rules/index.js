@@ -1,0 +1,21 @@
+// dsh-flow rules core — the pure state layer, shared by the host half and the
+// canvas. Nothing here touches the filesystem, the network, or the host `ctx`:
+// every module is a function of its arguments, which is what lets the whole
+// layer run under `node --test` with no mocks (asserted by scripts/check.js).
+//
+// Module map — filled in as the port lands:
+//   constants.js   enums, transition table, policy constants      (K2)
+//   identifiers.js sanitizeKey / keyDigest                        (K6)
+//   entities.js    isTeamState / isTeamMember / isTeamTask / …    (K1, K3)
+//   dependencies.js unsatisfiedDependencies / taskDepthsById      (K4)
+//   mailbox.js     unread rule and delivery-lease arithmetic      (K5)
+//   paths.js       workspace path scope classification            (K13)
+//   gates.js       validateCreateTask / evaluateQualityCompletion (K7, K8)
+//   delivery.js    canDeclareDelivery / describeQualityLoop       (K9, K10)
+//   coverage.js    buildCoverageMatrix                            (K11)
+//   followup.js    planQualityFollowUp                            (K12)
+//   profiles.js    profile key tables and topoSortTasks           (K14)
+//   events.js      append-only team event schema                  (protocol)
+//   project.js     events -> TeamState projection                 (protocol)
+
+export {}

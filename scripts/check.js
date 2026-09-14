@@ -4,10 +4,14 @@
 // engine merge moved it to `src/`, so `pnpm run build` had been failing.
 import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const fail = messages => {
+  for (const message of messages) console.error(`dsh-flow: ${message}`)
+  process.exit(1)
+}
 
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -22,31 +26,73 @@ const files = walk(root).sort()
 for (const file of files) execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' })
 console.log(`dsh-flow: ${files.length} modules parse clean`)
 
-// The canvas is served from an explicit allowlist in index.js, so adding a
-// module means editing two places. Forgetting the second one 404s the import
-// and the canvas never boots — a failure that shows up only in the browser, not
-// in `node --check`. Assert the invariant here instead.
+// Every module under src/ is served over HTTP, so it must appear in the
+// allowlist in index.js. Adding a module means editing two places; forgetting
+// the second 404s the import and the canvas never boots — a failure visible
+// only in the browser, never in `node --check`. Assert it here instead.
 const source = readFileSync(join(root, 'index.js'), 'utf8')
 const listMatch = /const CANVAS_SRC_FILES = \[([^\]]*)\]/.exec(source)
-if (listMatch === null) {
-  console.error('dsh-flow: CANVAS_SRC_FILES not found in index.js')
-  process.exit(1)
-}
+if (listMatch === null) fail(['CANVAS_SRC_FILES not found in index.js'])
 const served = new Set(listMatch[1].split(',').map(part => part.trim().replace(/^'|'$/g, '')).filter(part => part !== ''))
+
+// `readdirSync(recursive)` reports platform separators; module specifiers in the
+// allowlist are always POSIX, so normalise before comparing.
+const srcModules = readdirSync(join(root, 'src'), { recursive: true })
+  .filter(name => name.endsWith('.js'))
+  .map(name => name.split(sep).join('/'))
+  .sort()
+
+const modules = new Map()
+for (const name of srcModules) modules.set(name, readFileSync(join(root, 'src', name), 'utf8'))
+
+/** Resolve a relative specifier against the importing module's directory. */
+function resolveFrom(importer, specifier) {
+  const parts = importer.split('/').slice(0, -1)
+  for (const segment of specifier.split('/')) {
+    if (segment === '.' || segment === '') continue
+    if (segment === '..') parts.pop()
+    else parts.push(segment)
+  }
+  return parts.join('/')
+}
+
 const problems = []
-for (const name of readdirSync(join(root, 'src'))) {
-  if (!name.endsWith('.js')) continue
+for (const [name, module] of modules) {
   if (!served.has(name)) problems.push(`src/${name} is not in CANVAS_SRC_FILES (import would 404)`)
-  const module = readFileSync(join(root, 'src', name), 'utf8')
-  for (const [, target] of module.matchAll(/from '\.\/([^']+)'/g)) {
-    if (!served.has(target)) problems.push(`src/${name} imports ./${target}, which is not served`)
+  for (const [, specifier] of module.matchAll(/from '(\.[^']+)'/g)) {
+    const target = resolveFrom(name, specifier)
+    if (!modules.has(target)) problems.push(`src/${name} imports '${specifier}', which resolves to no file`)
+    else if (!served.has(target)) problems.push(`src/${name} imports '${specifier}', which is not served`)
   }
 }
-if (problems.length > 0) {
-  for (const problem of problems) console.error(`dsh-flow: ${problem}`)
-  process.exit(1)
-}
+if (problems.length > 0) fail(problems)
 console.log(`dsh-flow: ${served.size} canvas modules served, all relative imports resolve`)
+
+// The rules directory is the pure core: no IO, no host context, no dependency
+// on anything outside itself. It must stay importable and testable in plain
+// Node, which is what the markdown parser's extraction bought us — assert the
+// boundary rather than trusting it.
+// Comments are prose, not code: a header explaining "the pure core must not know
+// the host ctx" must not itself trip the ctx rule.
+const stripComments = text => text
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+
+const RULES_PREFIX = 'rules/'
+const boundary = []
+for (const [name, module] of modules) {
+  if (!name.startsWith(RULES_PREFIX)) continue
+  const code = stripComments(module)
+  if (/from 'node:/.test(code)) boundary.push(`src/${name} imports a node: builtin — the rules core must stay IO-free`)
+  if (/\bctx\b/.test(code)) boundary.push(`src/${name} references \`ctx\` — the rules core must not know the host`)
+  for (const [, specifier] of module.matchAll(/from '(\.[^']+)'/g)) {
+    if (!resolveFrom(name, specifier).startsWith(RULES_PREFIX)) {
+      boundary.push(`src/${name} imports '${specifier}' from outside src/rules/ — dependencies point inward only`)
+    }
+  }
+}
+if (boundary.length > 0) fail(boundary)
+console.log(`dsh-flow: ${modules.size > 0 ? [...modules.keys()].filter(n => n.startsWith(RULES_PREFIX)).length : 0} rules-core modules honour the pure-core boundary`)
 
 // DESIGN.md's first rule is "components reference tokens, never literal
 // colours". A documented rule nobody runs is a rule that decays, so it is
@@ -60,8 +106,5 @@ css.forEach((line, at) => {
   if (/^\}/.test(line)) inTokens = false
   if (!inTokens && /#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(line)) colourLeaks.push(`${at + 1}: ${line.trim()}`)
 })
-if (colourLeaks.length > 0) {
-  for (const leak of colourLeaks) console.error(`dsh-flow: theme.css:${leak} — literal colour outside the token blocks`)
-  process.exit(1)
-}
+if (colourLeaks.length > 0) fail(colourLeaks.map(leak => `theme.css:${leak} — literal colour outside the token blocks`))
 console.log('dsh-flow: theme.css has no literal colours outside its token blocks')

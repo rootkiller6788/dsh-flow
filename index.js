@@ -1349,6 +1349,8 @@ export function apply(ctx, config) {
     staticCache.set(key, entry)
     return entry
   }
+  /** mtime + length: changes exactly when the bytes do, and needs no hashing. */
+  const etagOf = entry => `"${entry.mtimeMs.toString(36)}-${entry.body.length.toString(36)}"`
   const file = (contentType, name) => async (_req, res) => {
     let entry
     try {
@@ -1357,7 +1359,7 @@ export function apply(ctx, config) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
       return res.end('not found')
     }
-    const etag = `"${entry.mtimeMs.toString(36)}-${entry.body.length.toString(36)}"`
+    const etag = etagOf(entry)
     if (_req.headers['if-none-match'] === etag) {
       // A 304 repeats the headers a 200 would have carried, so a cache keys the
       // revalidated entry the same way.
@@ -1403,7 +1405,16 @@ export function apply(ctx, config) {
     // gzip — PNG is already compressed.
     cachedBody(`assets/${name}`, new URL(`./assets/${name}`, import.meta.url), false).then(
       entry => {
-        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' })
+        const etag = etagOf(entry)
+        // `max-age` is what keeps the portraits off the wire during a session;
+        // the ETag is what keeps the request after it expires cheap. 15 portraits
+        // at 1.5MB each means an expiry without a validator re-downloads ~22MB,
+        // where a revalidation costs one stat and a 304.
+        if (req.headers['if-none-match'] === etag) {
+          res.writeHead(304, { etag, 'cache-control': 'max-age=3600' })
+          return res.end()
+        }
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600', etag })
         res.end(entry.body)
       },
       () => {

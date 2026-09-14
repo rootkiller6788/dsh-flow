@@ -787,8 +787,8 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body))
 }
 
-function sendFile(res, contentType, body) {
-  res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store' })
+function sendFile(res, contentType, body, etag) {
+  res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', ...(etag ? { etag } : {}) })
   res.end(body)
 }
 
@@ -921,11 +921,16 @@ export function apply(ctx, config) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
       return res.end('not found')
     }
+    const etag = `"${entry.mtimeMs.toString(36)}-${entry.body.length.toString(36)}"`
+    if (_req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { etag })
+      return res.end()
+    }
     if (entry.gzip !== null && (_req.headers['accept-encoding'] ?? '').includes('gzip')) {
-      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', 'content-encoding': 'gzip' })
+      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', etag, 'content-encoding': 'gzip' })
       return res.end(entry.gzip)
     }
-    sendFile(res, contentType, entry.body.toString('utf8'))
+    sendFile(res, contentType, entry.body.toString('utf8'), etag)
   }
   // Static pages are behind the same Host fence as the API: the DSH browser-trust
   // fence only covers /api, so a missing check here would expose these to

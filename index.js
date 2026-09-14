@@ -1,10 +1,10 @@
-import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 // Synchronous twins, used by the teardown flush: process 'exit' and a plugin
 // unload will not wait for a promise.
 import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import zlib from 'node:zlib'
 import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
 export const name = 'dsh-flow'
@@ -281,6 +281,7 @@ export class WorkspaceStore {
 
   async load() {
     await mkdir(dirname(this.dataFile), { recursive: true })
+    await this.sweepTempFiles()
     try {
       const raw = await readFile(this.dataFile)
       const parsed = JSON.parse(isGzip(raw) ? (await gunzip(raw)).toString('utf8') : raw.toString('utf8'))
@@ -351,6 +352,37 @@ export class WorkspaceStore {
 
   async fileMtime() {
     try { return (await stat(this.dataFile)).mtimeMs } catch { return null }
+  }
+
+  /**
+   * Delete temp files whose writing process is gone. Every write goes
+   * `<file>.<pid>.tmp` then rename, so a process that dies in between leaves a
+   * file nothing will ever look at again — one is sitting in a real profile
+   * right now. The pid in the name is what makes the sweep safe: a temp file
+   * whose owner no longer exists can never be renamed into place or adopted, so
+   * removing it is lossless. A live owner is left strictly alone, because a
+   * concurrent instance may be mid-write. Anything not matching
+   * `<base>.<digits>.tmp` is not ours and is skipped.
+   */
+  async sweepTempFiles(base = this.dataFile) {
+    const directory = dirname(base)
+    const prefix = `${basename(base)}.`
+    let names
+    try { names = await readdir(directory) } catch { return 0 }
+    let removed = 0
+    for (const name of names) {
+      if (!name.startsWith(prefix) || !name.endsWith('.tmp')) continue
+      const owner = Number.parseInt(name.slice(prefix.length, -'.tmp'.length), 10)
+      if (!Number.isInteger(owner) || owner === process.pid) continue
+      try {
+        process.kill(owner, 0)
+        continue
+      } catch {
+        // The owner is gone: the rename that would have consumed this never ran.
+      }
+      try { await unlink(join(directory, name)); removed += 1 } catch { /* raced with another sweep */ }
+    }
+    return removed
   }
 
   /**
@@ -953,6 +985,10 @@ export function apply(ctx, config) {
   const reportProjectionFailure = error => {
     ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
   }
+  // teams.json shares the directory and the temp-file convention, so a crashed
+  // snapshot write can strand a file the same way. The store swept its own file
+  // during load; this covers the sibling.
+  void store.sweepTempFiles(teamsFile).catch(reportProjectionFailure)
   const replaySession = session => {
     // Forks inherit their parent's log. The canvas already represents that
     // history through the parent node, so only project the child's live tail.

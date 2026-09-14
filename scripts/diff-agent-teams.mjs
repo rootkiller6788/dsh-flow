@@ -677,6 +677,62 @@ for (const [label, a, b] of [
   checks++
 }
 
+// ---------------------------------------------------------------------------
+// Loop verdict and goal coverage
+// ---------------------------------------------------------------------------
+{
+  const task = (id, status, extra = {}) => ({ id, subject: `s-${id}`, status, dependencies: [], createdAt: 1, updatedAt: 1, ...extra })
+  const team = (tasks, extra = {}) => ({ name: 'T', id: 'T', captainSessionId: 's', createdAt: 1, members: [], taskSeq: tasks.length, tasks, ...extra })
+
+  // describeQualityLoop's whole value is its precedence, so the shapes below
+  // cross the four states it can report with the flags that outrank each other.
+  const teams = [
+    ['empty', team([])],
+    ['open work', team([task('t1', 'pending')])],
+    ['nothing open', team([task('t1', 'completed', { kind: 'work' })])],
+    ['halted', team([task('t1', 'pending')], { halted: true })],
+    ['halted and deliverable', team([task('t1', 'completed', { kind: 'work' })], { halted: true })],
+    ['escalated', team([task('t1', 'pending')], { escalated: true })],
+    ['escalated and halted', team([task('t1', 'pending')], { escalated: true, halted: true })],
+    ['deliverable', team([task('t1', 'implementation', 'completed', { kind: 'implementation', inScope: ['src/'], changedPaths: ['src/a.js'] }), task('t2', 'completed', { kind: 'review', verdict: 'pass' })])],
+    ['blocked with blockers', team([task('t1', 'failed', { kind: 'implementation', inScope: ['src/'] })])],
+    ['real team', realTeam()],
+  ].filter(([, value]) => value !== undefined)
+
+  let mismatches = 0
+  for (const [label, value] of teams) {
+    const a = gates.describeQualityLoop(clone(value))
+    const b = ours.describeQualityLoop(clone(value))
+    if (show(a) !== show(b)) { mismatches++; differ(`describeQualityLoop [${label}]`, `original ${show(a)}\n      ours     ${show(b)}`) }
+  }
+  if (mismatches === 0) console.log(`ok    describeQualityLoop over ${teams.length} teams (halt > deliverable, escalation > blocked)`)
+  else failures++
+  checks++
+
+  const goals = ['g1', 'g2', 'g3']
+  const coverageCases = [
+    ['no tasks', []],
+    ['missing', [task('t1', 'completed', { coverageOf: ['g1'] })]],
+    ['passed', [task('t1', 'completed', { coverageOf: ['g1', 'g2'] })]],
+    ['in progress', [task('t1', 'in_progress', { coverageOf: ['g1'] })]],
+    ['blocked by failure', [task('t1', 'completed', { coverageOf: ['g1'] }), task('t2', 'failed', { coverageOf: ['g1'] })]],
+    ['blocked by cancel', [task('t1', 'completed', { coverageOf: ['g1'] }), task('t2', 'cancelled', { coverageOf: ['g1'] })]],
+    ['claims everything', [task('t1', 'completed', { coverageOf: ['g1', 'g2', 'g3'] })]],
+    ['empty coverageOf', [task('t1', 'completed', { coverageOf: [] })]],
+    ['real team', realTeam()?.tasks],
+  ].filter(([, tasks]) => tasks !== undefined)
+
+  let coverageMismatches = 0
+  for (const [label, tasks] of coverageCases) {
+    const a = gates.buildCoverageMatrix(goals, tasks)
+    const b = ours.buildCoverageMatrix(goals, tasks)
+    if (show(a) !== show(b)) { coverageMismatches++; differ(`buildCoverageMatrix [${label}]`, `original ${show(a)}\n      ours     ${show(b)}`) }
+  }
+  if (coverageMismatches === 0) console.log(`ok    buildCoverageMatrix over ${coverageCases.length} task sets × ${goals.length} goal items`)
+  else failures++
+  checks++
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

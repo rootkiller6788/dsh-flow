@@ -5,6 +5,7 @@
 // whether a single task may complete, this one asks whether the whole team may
 // be called done. The original computes the answer and never persists it, so
 // this is a rule to re-run rather than a field to read.
+import { OPEN_STATUSES } from './constants.js'
 import { isQualityKind, taskKindOf } from './gates.js'
 import { classifyChangedPath } from './paths.js'
 
@@ -97,3 +98,56 @@ export function resumeTeamState(team, reason) {
   }
 }
 
+
+/**
+ * One sentence on where the team stands, plus the state that produced it.
+ *
+ * Precedence matters and is the point of this function: a halt outranks a
+ * finished delivery (a halted team must be resumed before anything else), and
+ * an escalation outranks "blocked" because an escalated team is *still
+ * running* — reporting it as blocked would invite the reader to wait for work
+ * that will never come.
+ *
+ * @param team - the team record.
+ * @returns `{ state, halted, escalated, deliverable, summary }`.
+ */
+export function describeQualityLoop(team) {
+  const delivery = canDeclareDelivery(team)
+  if (team.halted === true) {
+    return {
+      state: 'halted',
+      halted: true,
+      escalated: team.escalated === true,
+      deliverable: false,
+      summary: 'Team is halted. Call agent_teams_resume with a reason before creating more work.',
+    }
+  }
+  if (delivery.ok) {
+    return {
+      state: 'deliverable',
+      halted: false,
+      escalated: team.escalated === true,
+      deliverable: true,
+      summary: 'All required quality gates passed. The captain may report delivery.',
+    }
+  }
+  if (team.escalated === true) {
+    return {
+      state: 'escalated',
+      halted: false,
+      escalated: true,
+      deliverable: false,
+      summary: 'Automatic review/repair loop hit its ceiling. The team is still running; do not treat this as halt. Escalate to the user instead of inventing another needs_revision cycle.',
+    }
+  }
+  const open = team.tasks.some(item => OPEN_STATUSES.includes(item.status))
+  return {
+    state: open ? 'running' : 'blocked',
+    halted: false,
+    escalated: false,
+    deliverable: false,
+    summary: open
+      ? 'Work remains on the shared task list; wait for the scheduler or complete owned tasks.'
+      : `Delivery is blocked: ${delivery.blockers.join('; ') || 'unresolved quality gates'}.`,
+  }
+}

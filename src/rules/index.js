@@ -36,4 +36,5 @@ export { stripLeadingBom, isUnread, unreadMessages, claimDelivery, releaseDelive
 export { PATH_CLASSIFICATIONS, normalizeWorkspacePath, pathMatchesScope, isDefaultExcluded, classifyChangedPath, collectChangedPaths, inScopeOverlap } from './paths.js'
 export { taskKindOf, isQualityKind, resolveReviewPolicy, dependencyClosureContains, validateCreateTask } from './gates.js'
 export { openHighFindings, acceptanceCovered, verifyCovered, evaluateQualityCompletion } from './completion.js'
-export { canDeclareDelivery, resumeTeamState } from './delivery.js'
+export { canDeclareDelivery, resumeTeamState, describeQualityLoop } from './delivery.js'
+export { buildCoverageMatrix } from './coverage.js'

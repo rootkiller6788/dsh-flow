@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import zlib from 'node:zlib'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 
@@ -912,12 +913,17 @@ export function apply(ctx, config) {
     try {
       const mtimeMs = (await stat(path)).mtimeMs
       if (entry === undefined || entry.mtimeMs !== mtimeMs) {
-        entry = { mtimeMs, body: await readFile(path) }
+        const body = await readFile(path)
+        entry = { mtimeMs, body, gzip: contentType.includes('text') ? zlib.gzipSync(body) : null }
         staticCache.set(name, entry)
       }
     } catch {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
       return res.end('not found')
+    }
+    if (entry.gzip !== null && (_req.headers['accept-encoding'] ?? '').includes('gzip')) {
+      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', 'content-encoding': 'gzip' })
+      return res.end(entry.gzip)
     }
     sendFile(res, contentType, entry.body.toString('utf8'))
   }

@@ -52,3 +52,4 @@ export {
   FLOW_ACTIVATION_PROMPT, FLOW_MEMBER_PROMPT,
 } from './tool-names.js'
 export { FALLBACK_FAILURE_CODES, isFallbackFailureCode, selectFallbackRoute, attemptFailureEvents } from './fallback.js'
+export { DEFAULT_EFFORT_SENTINEL, resolveMemberRoute } from './model-route.js'

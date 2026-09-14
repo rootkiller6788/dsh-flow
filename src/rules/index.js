@@ -35,3 +35,4 @@ export { unsatisfiedDependencies, taskDepthsById, taskVisualState, danglingDepen
 export { stripLeadingBom, isUnread, unreadMessages, claimDelivery, releaseDelivery, acknowledgeDelivery, mutateMailboxLines, parseMailboxLines } from './mailbox.js'
 export { PATH_CLASSIFICATIONS, normalizeWorkspacePath, pathMatchesScope, isDefaultExcluded, classifyChangedPath, collectChangedPaths, inScopeOverlap } from './paths.js'
 export { taskKindOf, isQualityKind, resolveReviewPolicy, dependencyClosureContains, validateCreateTask } from './gates.js'
+export { openHighFindings, acceptanceCovered, verifyCovered, evaluateQualityCompletion } from './completion.js'

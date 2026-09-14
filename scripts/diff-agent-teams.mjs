@@ -509,6 +509,111 @@ for (const [label, a, b] of [
   }
 }
 
+// ---------------------------------------------------------------------------
+// Completion gate
+// ---------------------------------------------------------------------------
+// Paired variants rather than a full cross-product: each task shape is run
+// against every update shape, which is the whole decision surface without the
+// combinatorial blow-up of crossing every field with every other.
+{
+  const finding = (severity, resolved) => ({ id: `f-${severity}-${resolved}`, severity, problem: 'p', requiredFix: 'x', ...resolved === undefined ? {} : { resolved } })
+  const result = (criterion, status) => ({ criterion, status })
+  const command = (name, status) => ({ command: name, status })
+
+  const tasks = []
+  const task = (label, extra) => tasks.push([label, {
+    id: 't1', subject: 's', status: 'in_progress', dependencies: [], createdAt: 1, updatedAt: 1, ...extra,
+  }])
+
+  for (const kind of [...ours.TASK_KINDS, undefined, 'bogus']) {
+    for (const status of ['pending', 'claimed', 'in_progress', 'completed', 'failed', 'cancelled']) {
+      task(`kind=${kind} status=${status}`, { kind, status })
+    }
+  }
+  for (const kind of ['review', 'requirements']) {
+    for (const verdict of [undefined, 'pass', 'needs_revision', 'reject']) {
+      for (const findings of [undefined, [], [finding('high')], [finding('high', true)], [finding('low')], [finding('blocker')]]) {
+        task(`${kind} verdict=${verdict} findings=${findings?.length ?? 'none'}`, { kind, status: 'in_progress', verdict, findings })
+        task(`${kind} completing verdict=${verdict} findings=${findings?.length ?? 'none'}`, { kind, status: 'in_progress', verdict, findings })
+      }
+    }
+  }
+  for (const kind of ['implementation', 'repair', 'verification', 'integration']) {
+    task(`${kind} full`, {
+      kind, status: 'in_progress', acceptance: ['a', 'b'], verify: ['v1'], inScope: ['src/'], outOfScope: ['lib/'],
+      acceptanceResults: [result('a', 'passed'), result('b', 'passed')],
+      commandsRun: [command('v1', 'passed')], changedPaths: ['src/a.js'],
+    })
+    task(`${kind} no acceptance`, { kind, status: 'in_progress', verify: ['v1'], inScope: ['src/'] })
+    task(`${kind} paraphrased results`, {
+      kind, status: 'in_progress', acceptance: ['a', 'b'], verify: ['v1'], inScope: ['src/'],
+      acceptanceResults: [result('a.', 'passed'), result('b!', 'passed')],
+      commandsRun: [command('v1 ', 'passed')], changedPaths: ['src/a.js'],
+    })
+    task(`${kind} out of scope`, {
+      kind, status: 'in_progress', acceptance: ['a'], verify: ['v1'], inScope: ['src/'],
+      acceptanceResults: [result('a', 'passed')], commandsRun: [command('v1', 'passed')], changedPaths: ['lib/b.js'],
+    })
+    task(`${kind} no changedPaths`, {
+      kind, status: 'in_progress', acceptance: ['a'], verify: ['v1'], inScope: ['src/'],
+      acceptanceResults: [result('a', 'passed')], commandsRun: [command('v1', 'passed')],
+    })
+    task(`${kind} failing command`, {
+      kind, status: 'in_progress', acceptance: ['a'], verify: ['v1'], inScope: ['src/'],
+      acceptanceResults: [result('a', 'passed')], commandsRun: [command('v1', 'failed')], changedPaths: ['src/a.js'],
+    })
+  }
+  task('work kind', { kind: 'work', status: 'in_progress' })
+  task('no kind', { status: 'in_progress' })
+
+  const updates = []
+  const update = (label, extra) => updates.push([label, extra])
+  for (const status of [undefined, ...ours.TASK_STATUS]) update(`status=${status}`, { status })
+  for (const verdict of [undefined, 'pass', 'needs_revision', 'reject']) update(`verdict=${verdict}`, { verdict })
+  update('findings empty', { findings: [] })
+  update('findings high', { findings: [finding('high')] })
+  update('findings high resolved', { findings: [finding('high', true)] })
+  update('acceptance passed', { acceptanceResults: [result('a', 'passed'), result('b', 'passed')] })
+  update('acceptance partial', { acceptanceResults: [result('a', 'passed')] })
+  update('acceptance failed', { acceptanceResults: [result('a', 'passed'), result('b', 'failed')] })
+  update('commands passed', { commandsRun: [command('v1', 'passed')] })
+  update('commands failed', { commandsRun: [command('v1', 'failed')] })
+  update('commands empty', { commandsRun: [] })
+  update('changedPaths in scope', { changedPaths: ['src/a.js'] })
+  update('changedPaths out of scope', { changedPaths: ['lib/b.js'] })
+  update('changedPaths illegal', { changedPaths: ['../escape'] })
+  update('changedPaths empty', { changedPaths: [] })
+  update('full pass', {
+    status: 'completed', verdict: 'pass',
+    acceptanceResults: [result('a', 'passed'), result('b', 'passed')],
+    commandsRun: [command('v1', 'passed')], changedPaths: ['src/a.js'],
+  })
+  update('fail with verdict', { status: 'failed', verdict: 'needs_revision', findings: [finding('medium')] })
+
+  let cases = 0
+  let mismatches = 0
+  for (const [taskLabel, taskValue] of tasks) {
+    for (const [updateLabel, updateValue] of updates) {
+      cases++
+      const a = gates.evaluateQualityCompletion(clone(taskValue), clone(updateValue))
+      const b = ours.evaluateQualityCompletion(clone(taskValue), clone(updateValue))
+      if (show(a) !== show(b)) {
+        mismatches++
+        if (mismatches <= 6) {
+          differ(`evaluateQualityCompletion [${taskLabel}] + [${updateLabel}]`,
+            `original ${show(a)}\n      ours     ${show(b)}`)
+        }
+      }
+    }
+  }
+  if (mismatches === 0) {
+    console.log(`ok    evaluateQualityCompletion over ${tasks.length} tasks × ${updates.length} updates = ${cases} cases`)
+    checks++
+  } else {
+    differ('evaluateQualityCompletion', `${mismatches} of ${cases} cases disagree`)
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

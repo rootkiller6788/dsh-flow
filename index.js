@@ -48,6 +48,10 @@ const LOCK_STALE_MS = 60_000
 // burst of session events costs a single full-state write instead of one per
 // event (issue #13: per-event saves pinned the main thread at ~90% CPU).
 const SAVE_DEBOUNCE_MS = 800
+// How long a repeated, identical failure stays folded into the previously logged
+// one. Long enough that a broken store cannot flood the log, short enough that a
+// still-broken store keeps reminding you.
+const FAILURE_LOG_WINDOW_MS = 60_000
 // The store is one JSON document that reaches megabytes once a session has
 // history, so it is written gzip-compressed: ~27% of the bytes on disk. Both
 // directions are async (libuv threadpool) — a synchronous gzip of the current
@@ -1202,8 +1206,24 @@ export function apply(ctx, config) {
   const projectionWorkspaceTitle = typeof config?.projectionWorkspaceTitle === 'string' && config.projectionWorkspaceTitle.trim() !== ''
     ? config.projectionWorkspaceTitle.trim().slice(0, MAX_TITLE_LENGTH)
     : 'DSH 任务'
+  // A write that keeps failing — a read-only data directory, a full disk — would
+  // otherwise log once per projected event, i.e. per turn event, flooding the
+  // host's log with the same line. Keep the first failure intact (its stack is
+  // the useful part), then at most one per window, carrying a count of what was
+  // folded into it so the situation stays visible instead of merely quieter.
+  let lastFailureLogAt = 0
+  let suppressedFailures = 0
   const reportProjectionFailure = error => {
-    ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+    const now = Date.now()
+    if (now - lastFailureLogAt < FAILURE_LOG_WINDOW_MS) {
+      suppressedFailures += 1
+      return
+    }
+    const reported = error instanceof Error ? error : new Error(String(error))
+    const suppressed = suppressedFailures
+    lastFailureLogAt = now
+    suppressedFailures = 0
+    ctx.logger.warn(suppressed === 0 ? reported : new Error(`${reported.message}（同一窗口内另有 ${suppressed} 次失败未单独记录）`))
   }
   // teams.json shares the directory and the temp-file convention, so a crashed
   // snapshot write can strand a file the same way. The store swept its own file

@@ -8,6 +8,14 @@ export const name = 'dsh-flow'
 export const inject = ['webServer', 'sessions']
 
 const MAX_BODY_BYTES = 32 * 1024
+// The team-snapshot route is the one endpoint whose body is not user input: the
+// canvas mirrors the whole live agent-teams state through it, and that state
+// still carries the fields the snapshot itself strips (executionPrompt alone is
+// ~3.4KB per member). A real 4-member team measures 13.4KB, so the 32KB shared
+// cap left barely 2.4x of headroom — and blowing past it failed silently (the
+// canvas' POST is fire-and-forget, so the snapshot just stopped updating). 1MB
+// fits a team two orders of magnitude larger than the measured one.
+const MAX_SNAPSHOT_BYTES = 1024 * 1024
 const MAX_TITLE_LENGTH = 120
 const MAX_NOTE_LENGTH = 4_000
 // Projected message text cap: longer replies truncate with a marker pointing
@@ -789,12 +797,12 @@ function workspaceTitle(cwd, fallbackTitle) {
   return segment && segment.trim() !== '' ? segment : fallbackTitle
 }
 
-async function readJson(req) {
+async function readJson(req, maxBytes = MAX_BODY_BYTES) {
   const chunks = []
   let length = 0
   for await (const chunk of req) {
     length += chunk.length
-    if (length > MAX_BODY_BYTES) throw new InputError('请求内容过大')
+    if (length > maxBytes) throw new InputError(`请求内容过大（上限 ${Math.round(maxBytes / 1024)}KB）`)
     chunks.push(chunk)
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new InputError('请求不是有效 JSON') }
@@ -934,7 +942,7 @@ export function apply(ctx, config) {
         }
       }
       if (path === '/dsh-flow/map-api/teams/snapshot' && req.method === 'POST') {
-        const body = await readJson(req)
+        const body = await readJson(req, MAX_SNAPSHOT_BYTES)
         if (!Array.isArray(body?.teams)) throw new InputError('teams 必须是数组')
         const teams = body.teams.map(slimTeam)
         const temporaryFile = `${teamsFile}.${process.pid}.tmp`

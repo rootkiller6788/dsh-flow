@@ -789,7 +789,8 @@ function sendJson(res, status, body) {
 
 function sendFile(res, contentType, body, etag) {
   res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', ...(etag ? { etag } : {}) })
-  res.end(body)
+  // HEAD shares the headers without the payload.
+  res.end(res.req?.method === 'HEAD' ? undefined : body)
 }
 
 /** The unified agent canvas: one page, one engine, one graph. */

@@ -31,3 +31,4 @@ export {
   isTeamMember, isTeamProfileSnapshot, coerceProfileSnapshot,
   isTeamTask, isTeamState, isTeamMessage, coerceTeamState,
 } from './entities.js'
+export { unsatisfiedDependencies, taskDepthsById, taskVisualState, danglingDependencies } from './dependencies.js'

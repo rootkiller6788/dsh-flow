@@ -211,6 +211,47 @@ for (const [label, a, b] of [
 }
 
 
+// ---------------------------------------------------------------------------
+// Dependency graph
+// ---------------------------------------------------------------------------
+{
+  const task = (id, status, dependencies = []) => ({ id, status, dependencies })
+  const graphs = [
+    ['real team tasks', realTeam()?.tasks],
+    ['empty', []],
+    ['chain', [task('t1', 'completed'), task('t2', 'pending', ['t1']), task('t3', 'pending', ['t2'])]],
+    ['diamond', [task('a', 'completed'), task('b', 'pending', ['a']), task('c', 'pending', ['a']), task('d', 'pending', ['b', 'c'])]],
+    ['missing dependency', [task('a', 'pending', ['ghost'])]],
+    ['self cycle', [task('a', 'pending', ['a'])]],
+    ['two cycle', [task('a', 'pending', ['b']), task('b', 'pending', ['a'])]],
+    ['three cycle', [task('a', 'pending', ['b']), task('b', 'pending', ['c']), task('c', 'pending', ['a'])]],
+    ['cycle plus tail', [task('a', 'pending', ['b']), task('b', 'pending', ['a']), task('c', 'pending', ['a'])]],
+    ['duplicate dependency', [task('a', 'completed'), task('b', 'pending', ['a', 'a'])]],
+    ['unfinished dependency', [task('a', 'in_progress'), task('b', 'pending', ['a'])]],
+    ['failed dependency blocks', [task('a', 'failed'), task('b', 'pending', ['a'])]],
+  ].filter(([, tasks]) => tasks !== undefined)
+
+  let mismatches = 0
+  for (const [label, tasks] of graphs) {
+    const left = [...state.taskDepthsById(tasks)].sort()
+    const right = [...ours.taskDepthsById(tasks)].sort()
+    if (show(left) !== show(right)) { mismatches++; console.error(`FAIL  taskDepthsById [${label}] ${show(left)} vs ${show(right)}`) }
+    for (const item of tasks) {
+      const a = state.unsatisfiedDependencies(tasks, item.dependencies)
+      const b = ours.unsatisfiedDependencies(tasks, item.dependencies)
+      if (show(a) !== show(b)) { mismatches++; console.error(`FAIL  unsatisfiedDependencies [${label}/${item.id}] ${show(a)} vs ${show(b)}`) }
+      for (const status of ours.TASK_STATUS) {
+        const x = state.taskVisualState(status, item.dependencies, tasks)
+        const y = ours.taskVisualState(status, item.dependencies, tasks)
+        if (x !== y) { mismatches++; console.error(`FAIL  taskVisualState [${label}/${item.id}/${status}] ${x} vs ${y}`) }
+      }
+    }
+  }
+  if (mismatches === 0) console.log(`ok    dependency graph over ${graphs.length} graphs × 6 statuses (chains, diamonds, cycles, dangling ids, failures)`)
+  else failures++
+  checks++
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

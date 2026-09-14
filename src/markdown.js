@@ -1,5 +1,5 @@
 // dsh-flow canvas — see src/canvas.js for the module map.
-import { escapeHtml } from './core.js'
+import { escapeHtml } from './html.js'
 
 
 // ---------------------------------------------------------------------------

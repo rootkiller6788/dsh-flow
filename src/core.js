@@ -1,5 +1,6 @@
 // dsh-flow canvas — see src/canvas.js for the module map.
 // Foundation: shared state, geometry constants, localStorage stores, host bridge.
+import { escapeHtml } from './html.js'
 const app = document.querySelector('#app')
 const Engine = window.dshFlowEngine
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
@@ -53,7 +54,6 @@ const state = {
   scene: null, sceneById: null, sceneEdges: null,
 }
 
-const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 const selectorValue = value => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 
 // ---------------------------------------------------------------------------

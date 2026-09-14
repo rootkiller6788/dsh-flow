@@ -1184,7 +1184,10 @@ function canvasPage() {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/theme.css"></head><body><div id="app"></div><script src="/dsh-flow/engine.js"></script><script type="module" src="/dsh-flow/src/canvas.js"></script></body></html>`
 }
 
-const CANVAS_SRC_FILES = ['core.js', 'markdown.js', 'relay.js', 'session.js', 'teams.js', 'scene.js', 'view.js', 'actions.js', 'canvas.js', 'artwork.js']
+// Deliberately explicit — this list is also the serve allowlist, so it must not
+// be auto-widened. The cost is that adding a module means adding it here too;
+// forgetting silently 404s the import and the canvas never boots.
+const CANVAS_SRC_FILES = ['core.js', 'html.js', 'markdown.js', 'relay.js', 'session.js', 'teams.js', 'scene.js', 'view.js', 'actions.js', 'canvas.js', 'artwork.js']
 
 /**
  * Mount the dsh-flow routes on the existing DSH Web Server: the unified canvas

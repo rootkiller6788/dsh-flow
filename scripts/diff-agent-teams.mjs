@@ -933,6 +933,162 @@ for (const [label, a, b] of [
   }
 }
 
+// ---------------------------------------------------------------------------
+// Randomised fuzz over the whole pure surface
+// ---------------------------------------------------------------------------
+// The sections above cross dimensions deliberately, which makes them good at
+// proving a rule exists and bad at finding combinations nobody thought to
+// cross. This one throws random teams and random operations at every exported
+// rule and compares the two implementations, including whether they *threw* —
+// a port that throws where the original returns is as wrong as one that returns
+// the wrong thing.
+{
+  const seedOf = Number.parseInt(process.env['DSH_FLOW_FUZZ_SEED'] ?? '20260915', 10)
+  // Named apart from the imported `state` module deliberately: shadowing it here
+  // silently replaced the reference implementation with a number.
+  let rngState = seedOf >>> 0
+  const rng = () => { rngState = (Math.imul(rngState, 1664525) + 1013904223) >>> 0; return rngState / 0x100000000 }
+  const pick = list => list[Math.floor(rng() * list.length)]
+  const chance = probability => rng() < probability
+  const some = list => list.filter(() => chance(0.5))
+
+  const WORDS = ['build', '标定', '', '  ', 'src/', '../escape', '🎉', 'a very long subject that goes on and on', 'x']
+  const PATHS = ['src/a.js', 'src/', 'lib/b.js', '.env', '../x', 'C:/x', 'secrets/k', 'a b/c.js', '', '.']
+  const ROLES = [undefined, 'engineer', 'scientist', '验证']
+  const FIXED = ['pass', 'needs_revision', 'reject', undefined]
+
+  const randomFinding = index => ({
+    id: `f${index}`,
+    severity: pick(['low', 'medium', 'high', 'blocker']),
+    problem: pick(WORDS),
+    requiredFix: pick(WORDS),
+    ...chance(0.3) ? { resolved: chance(0.5) } : {},
+    ...chance(0.3) ? { file: pick(PATHS) } : {},
+  })
+  const randomTask = (index, ids) => {
+    const kind = pick([...ours.TASK_KINDS, undefined])
+    return {
+      id: `t${index}`,
+      subject: pick(WORDS),
+      kind,
+      status: pick(ours.TASK_STATUS),
+      ...chance(0.6) ? { dependencies: some(ids) } : {},
+      ...chance(0.4) ? { assignee: pick(['captain', 'a', 'b', 'ghost']) } : {},
+      ...chance(0.3) ? { objective: pick(WORDS) } : {},
+      ...chance(0.3) ? { acceptance: some(WORDS) } : {},
+      ...chance(0.3) ? { verify: some(WORDS) } : {},
+      ...chance(0.3) ? { inScope: some(PATHS) } : {},
+      ...chance(0.2) ? { outOfScope: some(PATHS) } : {},
+      ...chance(0.3) ? { changedPaths: some(PATHS) } : {},
+      ...chance(0.3) ? { findings: Array.from({ length: Math.floor(rng() * 3) }, (_, at) => randomFinding(at)) } : {},
+      ...chance(0.3) ? { verdict: pick(FIXED) } : {},
+      ...chance(0.3) ? { round: 1 + Math.floor(rng() * 5) } : {},
+      ...chance(0.2) ? { reviewedTaskId: pick(['t0', 't1', 'ghost']) } : {},
+      ...chance(0.2) ? { sourceTaskId: pick(['t0', 't1', 'ghost']) } : {},
+      ...chance(0.2) ? { sourceFindingIds: some(['f0', 'f1']) } : {},
+      ...chance(0.2) ? { coverageOf: some(['g1', 'g2']) } : {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+  }
+
+  const randomTeam = () => {
+    const count = Math.floor(rng() * 5)
+    const ids = Array.from({ length: count }, (_, index) => `t${index}`)
+    const tasks = Array.from({ length: count }, (_, index) => randomTask(index, ids.slice(0, index)))
+    const members = Array.from({ length: Math.floor(rng() * 4) }, (_, index) => ({
+      id: chance(0.8) ? `child-${index}` : '',
+      name: pick(['a', 'b', '建模手', 'captain']),
+      role: pick(ROLES),
+      joinedAt: 1,
+      status: pick(['idle', 'working', 'removed']),
+    }))
+    return {
+      name: pick(WORDS), id: 'T', captainSessionId: pick(['s', '']), createdAt: 1,
+      members, tasks, taskSeq: count,
+      ...chance(0.3) ? { phase: pick(['staged', 'running']) } : {},
+      ...chance(0.2) ? { halted: chance(0.5) } : {},
+      ...chance(0.2) ? { escalated: chance(0.5) } : {},
+      ...chance(0.3) ? { reviewPolicy: { codeMaxRounds: 1 + Math.floor(rng() * 4), maxRepairAttempts: Math.floor(rng() * 3) } } : {},
+    }
+  }
+
+
+  const ROUNDS = Number.parseInt(process.env['DSH_FLOW_FUZZ_ROUNDS'] ?? '4000', 10)
+  let cases = 0
+  let mismatches = 0
+  let bothThrew = 0
+  const note = (label, detail) => {
+    mismatches++
+    if (mismatches <= 8) differ(label, detail)
+  }
+
+  for (let round = 0; round < ROUNDS; round++) {
+    const team = randomTeam()
+    const closed = team.tasks.length === 0 ? undefined : pick(team.tasks)
+    const input = {
+      subject: pick(WORDS),
+      kind: pick([...ours.TASK_KINDS, undefined, 'bogus']),
+      objective: pick(WORDS), acceptance: some(WORDS), inScope: some(PATHS), verify: some(WORDS),
+      dependencies: some(team.tasks.map(item => item.id).concat('ghost')),
+      reviewedTaskId: pick(['t0', 'ghost', undefined]),
+      sourceTaskId: pick(['t0', 'ghost', undefined]),
+      sourceFindingIds: some(['f0']),
+      resume: chance(0.5), resumeReason: pick(WORDS),
+    }
+    const update = {
+      ...chance(0.7) ? { status: pick(ours.TASK_STATUS) } : {},
+      ...chance(0.4) ? { verdict: pick(FIXED) } : {},
+      ...chance(0.4) ? { findings: [] } : {},
+      ...chance(0.4) ? { acceptanceResults: some(['a', 'b']).map(criterion => ({ criterion, status: pick(['passed', 'failed']) })) } : {},
+      ...chance(0.4) ? { commandsRun: some(['v']).map(command => ({ command, status: pick(['passed', 'failed']) })) } : {},
+      ...chance(0.4) ? { changedPaths: some(PATHS) } : {},
+    }
+
+    const compare = (label, runOriginal, runOurs) => {
+      cases++
+      let expected, mine
+      try { expected = { ok: true, value: runOriginal() } } catch (error) { expected = { ok: false, error: error.message } }
+      try { mine = { ok: true, value: runOurs() } } catch (error) { mine = { ok: false, error: error.message } }
+      if (expected.ok !== mine.ok) {
+        note(`fuzz ${label} round ${round}`, `original ${expected.ok ? 'returned' : `threw ${expected.error}`}, ours ${mine.ok ? 'returned' : `threw ${mine.error}`}`)
+        return
+      }
+      if (!expected.ok) { bothThrew++; if (expected.error !== mine.error) note(`fuzz ${label} round ${round}`, `threw differently: "${expected.error}" vs "${mine.error}"`); return }
+      if (show(expected.value) !== show(mine.value)) {
+        note(`fuzz ${label} round ${round}`, `original ${show(expected.value).slice(0, 160)}\n      ours     ${show(mine.value).slice(0, 160)}`)
+      }
+    }
+
+    compare('validateCreateTask', () => state.validateCreateTask(clone(team), clone(input)), () => ours.validateCreateTask(clone(team), clone(input)))
+    compare('canDeclareDelivery', () => gates.canDeclareDelivery(clone(team)), () => ours.canDeclareDelivery(clone(team)))
+    compare('describeQualityLoop', () => gates.describeQualityLoop(clone(team)), () => ours.describeQualityLoop(clone(team)))
+    // Inputs are drawn once and reused: drawing inside each closure would give
+    // the two implementations different inputs and compare nothing.
+    const reason = pick(WORDS)
+    compare('resumeTeamState', () => gates.resumeTeamState(clone(team), reason), () => ours.resumeTeamState(clone(team), reason))
+    compare('buildCoverageMatrix', () => gates.buildCoverageMatrix(['g1', 'g2'], clone(team.tasks)), () => ours.buildCoverageMatrix(['g1', 'g2'], clone(team.tasks)))
+    compare('taskDepthsById', () => [...state.taskDepthsById(clone(team.tasks))].sort(), () => [...ours.taskDepthsById(clone(team.tasks))].sort())
+    const asFile = clone(team)
+    compare('coerceTeamState', () => { writeTeam(asFile); try { return state.readTeamSync(scratch, 'T') ?? null } catch { return null } }, () => ours.coerceTeamState(clone(team), 'T') ?? null)
+    if (closed !== undefined) {
+      compare('evaluateQualityCompletion', () => gates.evaluateQualityCompletion(clone(closed), clone(update)), () => ours.evaluateQualityCompletion(clone(closed), clone(update)))
+      compare('planQualityFollowUp', () => gates.planQualityFollowUp(clone(team), clone(closed)), () => ours.planQualityFollowUp(clone(team), clone(closed)))
+    }
+    // `topoSortTasks` is module-private in the original, so there is nothing to
+    // compare it against; its contract is asserted by property in its own
+    // section above. Calling our implementation from both sides would compare it
+    // with itself and pass always, which is worse than no check at all.
+  }
+
+  if (mismatches === 0) {
+    console.log(`ok    randomised fuzz: ${ROUNDS} rounds x 9 rules = ${cases} comparisons (${bothThrew} agreed rejections), seed ${seedOf}`)
+    checks++
+  } else {
+    differ('randomised fuzz', `${mismatches} of ${cases} comparisons disagree (seed ${seedOf})`)
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

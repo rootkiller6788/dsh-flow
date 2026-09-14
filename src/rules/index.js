@@ -58,3 +58,4 @@ export {
   ownedOpenTask, nextReadyTask, formatDependencyOutputs, collectCompletedDependencyOutputs, fallbackMailboxPrompt, assignmentPrompt,
 } from './assignment.js'
 export { activateTaskAttempt, beginTaskAttempt, cancelUnfinishedTask, invalidateTaskAttempt } from './attempts.js'
+export { RETIRED_MEMBERS_FILE, parseRetiredMemberIds, serializeRetiredMemberIds, mergeRetiredMemberIds, isRetiredMember } from './retired.js'

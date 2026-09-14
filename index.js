@@ -24,7 +24,24 @@ const MAX_NOTE_LENGTH = 4_000
 // Projected message text cap: longer replies truncate with a marker pointing
 // at the detail view instead of silently cutting mid-sentence.
 const MAX_PROJECTION_LENGTH = 8_000
-const PROJECTION_TRUNCATED_SUFFIX = '\n——…（详情查看全文）'
+const PROJECTION_TRUNCATED_SUFFIX = '\n——…（已截断，完整内容在「对话」标签中打开）'
+// Tool arguments and results are where the projection actually gets big: file
+// contents, diffs and command output arrive verbatim, and they measured 2.70MB
+// — 60% of a real 4.23MB store — across 722 entries, single fields reaching 48K
+// characters. Chat text has always been capped; these two never were.
+//
+// The distribution is extremely long-tailed: the median argument is 404
+// characters and the median result 127, while the 90th percentile is 2843 and
+// 4018. So a 4000-character cap clips only the outlier tail that causes the
+// bloat — 114 of 722 entries (16%) — and leaves 84% of entries byte-identical,
+// while removing 29% of the bytes. 8000 would touch 6%; 2000 would touch 36% for
+// another 18 points. DSH keeps the full record (the canvas already sends you
+// there for the complete run), so the marker says where to find it.
+const MAX_TOOL_FIELD_LENGTH = 4_000
+function truncateToolText(text) {
+  if (typeof text !== 'string' || text.length <= MAX_TOOL_FIELD_LENGTH) return text
+  return `${text.slice(0, MAX_TOOL_FIELD_LENGTH)}\n——…（已截断：原文 ${text.length} 字，此处保留前 ${MAX_TOOL_FIELD_LENGTH} 字；完整过程在「对话」标签中打开）`
+}
 const TOPIC_COLORS = ['#0f766e', '#0e7490', '#6d28d9', '#b45309', '#be123c']
 const LOCK_STALE_MS = 60_000
 // Deferred (event-projection) writes coalesce into one save per window, so a
@@ -665,15 +682,16 @@ export class WorkspaceStore {
     const callId = String(event.type === 'tool/call' ? data.callId : data.message?.source?.callId ?? '')
     const entry = process.find(item => item.callId === callId)
     if (event.type === 'tool/call') {
+      const toolArguments = truncateToolText(data.arguments)
       if (entry === undefined) {
-        process.push({ callId, turn: data.turn, step: data.step, name: data.name, arguments: data.arguments, result: null, error: null })
+        process.push({ callId, turn: data.turn, step: data.step, name: data.name, arguments: toolArguments, result: null, error: null })
       } else {
         entry.name = data.name
-        entry.arguments = data.arguments
+        entry.arguments = toolArguments
       }
     } else {
-      const outcome = contentText(data.message?.content)
-      const error = errorText(data.error)
+      const outcome = truncateToolText(contentText(data.message?.content))
+      const error = truncateToolText(errorText(data.error))
       if (entry === undefined) {
         process.push({ callId, turn: data.turn, step: data.step, name: '工具调用', arguments: null, result: outcome, error })
       } else {
@@ -803,7 +821,7 @@ function foldLegacyToolCards(workspaces) {
         changed = true
         if (message.kind === 'tool') {
           const [name = '工具调用', ...argumentLines] = message.text.split('\n')
-          const entry = { callId: `legacy-${assistant.process.length}`, name, arguments: argumentLines.join('\n'), result: null, error: null }
+          const entry = { callId: `legacy-${assistant.process.length}`, name, arguments: truncateToolText(argumentLines.join('\n')), result: null, error: null }
           pending.push(entry)
           assistant.process.push(entry)
         } else {
@@ -812,7 +830,7 @@ function foldLegacyToolCards(workspaces) {
             assistant.process.push(orphan)
             return orphan
           })()
-          entry.result = message.text
+          entry.result = truncateToolText(message.text)
         }
       }
       thread.messages = folded

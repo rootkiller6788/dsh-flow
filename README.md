@@ -205,7 +205,7 @@ dsh web
 # 对话区顶部标签行点「智能体画布」
 ```
 
-改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `src/*` / `theme.css` 是每次请求现读（`cache-control: no-store`），改完刷新页面即可。
+改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `src/*` / `theme.css` / `assets/*.png` 按 mtime 走内存缓存并以 `cache-control: no-cache` + ETag 复验——每次请求都会确认文件没变（变了就回 200 新内容），所以改完刷新页面即可。
 
 ## 已知边界
 

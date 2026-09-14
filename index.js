@@ -806,7 +806,17 @@ function sendJson(res, status, body) {
 }
 
 function sendFile(res, contentType, body, etag) {
-  res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', ...(etag ? { etag } : {}) })
+  // `no-cache`, not `no-store`: it still forces a revalidation on every request,
+  // so a changed file is never served stale — but unlike `no-store` it lets the
+  // browser keep the response and revalidate it, which is the only way the ETag
+  // below ever produces a 304. With `no-store` the browser is forbidden from
+  // storing the response at all, so it has nothing to revalidate and never
+  // sends If-None-Match: the 304 branch was unreachable.
+  // A response carrying an ETag came from the static cache, which can serve a
+  // gzip or an identity variant of the same URL — so it must declare that it
+  // varies by Accept-Encoding. (Both variants share one ETag, so without Vary a
+  // cache could hand the gzip body to a client that never asked for gzip.)
+  res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-cache', ...(etag ? { etag, vary: 'accept-encoding' } : {}) })
   // HEAD shares the headers without the payload.
   res.end(res.req?.method === 'HEAD' ? undefined : body)
 }
@@ -965,11 +975,13 @@ export function apply(ctx, config) {
     }
     const etag = `"${entry.mtimeMs.toString(36)}-${entry.body.length.toString(36)}"`
     if (_req.headers['if-none-match'] === etag) {
-      res.writeHead(304, { etag })
+      // A 304 repeats the headers a 200 would have carried, so a cache keys the
+      // revalidated entry the same way.
+      res.writeHead(304, { etag, vary: 'accept-encoding', 'cache-control': 'no-cache' })
       return res.end()
     }
     if (entry.gzip !== null && (_req.headers['accept-encoding'] ?? '').includes('gzip')) {
-      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', etag, 'content-encoding': 'gzip' })
+      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-cache', etag, 'content-encoding': 'gzip', vary: 'accept-encoding' })
       return res.end(entry.gzip)
     }
     sendFile(res, contentType, entry.body.toString('utf8'), etag)

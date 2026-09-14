@@ -21,9 +21,9 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node --check index.js && node --check client.js && node --check engine.js && node --check canvas.js",
+    "build": "node scripts/check.js",
     "prepare": "pnpm run build",
-    "test": "node --test test/*.test.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=22.19.0"

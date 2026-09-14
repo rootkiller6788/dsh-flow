@@ -43,3 +43,4 @@ export { canDeclareDelivery, resumeTeamState, describeQualityLoop } from './deli
 export { buildCoverageMatrix } from './coverage.js'
 export { looksLikeGateTestContract, sanitizeReviewObjective, sanitizeReviewAcceptance, unresolvedFindings, findingKey, schedulableAssignee, countRepairAttempts, hasOpenFollowUp, planQualityFollowUp } from './followup.js'
 export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, parseProfileInvocation, resolveProfileTaskPlanning } from './profiles.js'
+export { TEAM_EVENT_TYPES, requiredEventFields, optionalEventFields, isTeamEvent, teamEvent, parseEventLog, serializeEventLog } from './events.js'

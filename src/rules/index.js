@@ -46,3 +46,8 @@ export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, pars
 export { TEAM_EVENT_TYPES, requiredEventFields, optionalEventFields, isTeamEvent, teamEvent, parseEventLog, serializeEventLog } from './events.js'
 export { projectTeam, replayTeam, taskAttempts, taskRollbacks } from './project.js'
 export { TEAM_SCHEMA_VERSION, isTeamManifest, createTeamManifest, parseTeamManifest, serializeTeamManifest, peekSchemaVersion } from './manifest.js'
+export {
+  FLOW_TOOL_NAMES, FLOW_MEMBER_TOOL_NAMES, FLOW_CAPTAIN_TOOL_NAMES, FLOW_ROLES,
+  roleInTeam, deniedToolsFor, isMemberRole, promptForRole,
+  FLOW_ACTIVATION_PROMPT, FLOW_MEMBER_PROMPT,
+} from './tool-names.js'

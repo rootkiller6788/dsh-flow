@@ -53,3 +53,7 @@ export {
 } from './tool-names.js'
 export { FALLBACK_FAILURE_CODES, isFallbackFailureCode, selectFallbackRoute, attemptFailureEvents } from './fallback.js'
 export { DEFAULT_EFFORT_SENTINEL, resolveMemberRoute } from './model-route.js'
+export {
+  DEPENDENCY_OUTPUT_MAX_CHARS, DEPENDENCY_OUTPUTS_TOTAL_MAX_CHARS,
+  ownedOpenTask, nextReadyTask, formatDependencyOutputs, fallbackMailboxPrompt, assignmentPrompt,
+} from './assignment.js'

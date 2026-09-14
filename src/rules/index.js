@@ -18,4 +18,8 @@
 //   events.js      append-only team event schema                  (protocol)
 //   project.js     events -> TeamState projection                 (protocol)
 
-export {}
+export {
+  TASK_STATUS, TERMINAL_TASK_STATUSES, TASK_KINDS, REVIEW_VERDICTS, FINDING_SEVERITIES,
+  MEMBER_STATUS, CAPTAIN_KEY, CAPTAIN_ASSIGNEE,
+  TASK_TRANSITIONS, transitionError,
+} from './constants.js'

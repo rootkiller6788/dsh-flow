@@ -1284,7 +1284,12 @@ export function apply(ctx, config) {
       // agent-teams plugin is removed (its data is frozen, not live).
       if (path === '/dsh-flow/map-api/teams' && req.method === 'GET') {
         try {
-          const stored = JSON.parse(await readFile(teamsFile, 'utf8'))
+          // The canvas polls this once a second whenever the live agent-teams
+          // feed is unavailable, so it goes through the same mtime-keyed cache
+          // the static files use instead of reading and parsing the file each
+          // time. No gzip: the payload is handed to JSON.parse in-process.
+          const entry = await cachedBody('teams.json', teamsFile, false)
+          const stored = JSON.parse(entry.body.toString('utf8'))
           return sendJson(res, 200, { teams: Array.isArray(stored.teams) ? stored.teams : [] })
         } catch {
           return sendJson(res, 200, { teams: [] })

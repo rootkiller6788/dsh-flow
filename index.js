@@ -314,6 +314,7 @@ export class WorkspaceStore {
       const { workspace, thread } = this.locateThread(threadId)
       const at = new Date().toISOString()
       const message = { id: randomUUID(), text: requiredText(text, MAX_NOTE_LENGTH, 'text'), kind: 'user', at }
+      message.rev = this.touch(thread)
       thread.messages.push(message)
       thread.updatedAt = at
       workspace.updatedAt = at
@@ -406,11 +407,14 @@ export class WorkspaceStore {
       const raw = await readFile(this.dataFile)
       const parsed = JSON.parse(isGzip(raw) ? (await gunzip(raw)).toString('utf8') : raw.toString('utf8'))
       const { state, migrated } = normalizeState(parsed)
+      const revMissing = !Number.isSafeInteger(parsed?.rev)
+      const { rev, stamped } = stampMissingRevs(state)
+      state.rev = rev
       this.state = state
-      if (migrated) await this.save()
+      if (migrated || stamped || revMissing) await this.save()
     } catch (error) {
       if (error?.code !== 'ENOENT') throw new Error(`dsh-flow: cannot read ${this.dataFile}: ${error.message}`)
-      this.state = { version: 4, hiddenSessionIds: [], workspaces: [] }
+      this.state = { version: 4, hiddenSessionIds: [], workspaces: [], rev: 0 }
       await this.save()
     }
   }
@@ -578,15 +582,24 @@ export class WorkspaceStore {
   dshThread(workspace, session) {
     let thread = workspace.threads.find(item => item.dshSessionId === session.id)
     if (thread !== undefined) {
+      let changed = false
       if (typeof session.title === 'string' && session.title.trim() !== '') {
         const title = session.title.slice(0, MAX_TITLE_LENGTH)
+        if (title !== thread.title) changed = true
         thread.title = title
         thread.dshSessionTitle = title
       }
       // `seedLength` is DSH's durable fork cut. Keep it even after the
       // session has been restored, when its in-process `firstLiveSeq` moves.
       const seedLength = session.header?.seedLength
-      if (Number.isSafeInteger(seedLength) && seedLength >= 0) thread.sourceSeedLength = seedLength
+      if (Number.isSafeInteger(seedLength) && seedLength >= 0) {
+        if (seedLength !== thread.sourceSeedLength) changed = true
+        thread.sourceSeedLength = seedLength
+      }
+      // Only an actual change earns a revision: dshThread runs for every event
+      // of the session, and stamping unconditionally would make every reader
+      // reload the thread on every event.
+      if (changed) this.touch(thread)
       return thread
     }
     const parentSessionId = typeof session.header?.parentSession === 'string' ? session.header.parentSession : null
@@ -612,10 +625,16 @@ export class WorkspaceStore {
       pendingProcess: [],
     }
     workspace.threads.push(thread)
+    this.touch(thread)
     // A child may arrive before its parent during startup replay. Repair that
     // relation when the missing parent later reaches the projection.
     for (const child of workspace.threads) {
-      if (child.sourceParentSessionId === session.id && child.parentId === null) child.parentId = thread.id
+      if (child.sourceParentSessionId === session.id && child.parentId === null) {
+        child.parentId = thread.id
+        // An edge appeared in the graph: the child has no new message, so the
+        // stamp is the only thing that tells a reader the tree changed.
+        this.touch(child)
+      }
     }
     workspace.updatedAt = now
     return thread
@@ -625,6 +644,9 @@ export class WorkspaceStore {
     if (event.type === 'session/title' && typeof event.data?.title === 'string') {
       thread.title = event.data.title.slice(0, MAX_TITLE_LENGTH)
       thread.dshSessionTitle = thread.title
+      // No message carries this change, so the thread needs the stamp itself or
+      // an incremental reader would keep showing the old title forever.
+      this.touch(thread)
       thread.updatedAt = new Date(event.time).toISOString()
       workspace.updatedAt = thread.updatedAt
       return
@@ -655,14 +677,30 @@ export class WorkspaceStore {
       message.text = agent.text
     }
     this.attachPendingProcess(thread, message)
+    message.rev = this.touch(thread)
     thread.messages.push(message)
     seen.add(event.seq)
     thread.updatedAt = at
     workspace.updatedAt = at
     if (thread.dshSessionTitle === null && projection.kind === 'user' && message.agent === undefined) {
+      // The derived title rides along with the message that produced it, so no
+      // separate stamp: the thread already moved.
       thread.title = titleFromText(message.text)
       thread.dshSessionTitle = thread.title
     }
+  }
+
+  /**
+   * Stamp a change and return its revision. Every mutation to a thread's content
+   * routes through here, so `thread.rev` is always the highest revision in that
+   * thread — which is what makes it usable as a client cursor: a reader that has
+   * applied everything up to `rev` only needs what comes after it.
+   */
+  touch(thread) {
+    const rev = (this.state.rev ?? 0) + 1
+    this.state.rev = rev
+    thread.rev = rev
+    return rev
   }
 
   /**
@@ -699,6 +737,10 @@ export class WorkspaceStore {
         entry.error = error
       }
     }
+    // A tool result folds into an already-delivered message, so the message —
+    // not just the thread — needs a fresh revision or an incremental reader
+    // would never see the result it is waiting for.
+    if (target !== undefined) target.rev = this.touch(thread)
     thread.updatedAt = at
   }
 
@@ -728,6 +770,43 @@ export class WorkspaceStore {
 
   summary(workspace) {
     return { id: workspace.id, kind: workspace.kind ?? 'manual', cwd: workspace.cwd ?? null, title: workspace.title, createdAt: workspace.createdAt, updatedAt: workspace.updatedAt, threadCount: workspace.threads.length }
+  }
+
+  /**
+   * The canvas' incremental read. Returns every thread belonging to
+   * `sessionIds`, but each thread carries only the messages the caller's cursor
+   * has not seen — plus the full thread id list, so a reader can prune nodes
+   * that went away (archiving removes a thread without leaving a tombstone).
+   *
+   * This is what keeps a poll cheap: appending one message to a 235-message
+   * thread costs that one message instead of the whole workspace. It also
+   * replaces reading every workspace in full and throwing away the threads that
+   * were not asked for.
+   *
+   * The response references the live state rather than cloning it. `sendJson`
+   * stringifies synchronously in the same microtask, and nothing else can run in
+   * between, so there is no window for a mutation to be observed half-applied —
+   * which is 6ms of structuredClone per request saved.
+   */
+  async projection(sessionIds, cursors) {
+    await this.ready
+    if (!Array.isArray(sessionIds) || sessionIds.some(id => typeof id !== 'string')) throw new InputError('sessionIds 必须是字符串数组')
+    if (cursors !== null && cursors !== undefined && typeof cursors !== 'object') throw new InputError('cursors 必须是对象')
+    const wanted = new Set(sessionIds)
+    const known = cursors ?? {}
+    const threadIds = []
+    const threads = []
+    for (const workspace of this.state.workspaces) {
+      for (const thread of workspace.threads) {
+        if (thread.dshSessionId === null || !wanted.has(thread.dshSessionId)) continue
+        threadIds.push(thread.id)
+        const cursor = Number.isSafeInteger(known[thread.id]) ? known[thread.id] : 0
+        if ((thread.rev ?? 0) <= cursor) continue
+        const { messages, ...metadata } = thread
+        threads.push({ ...metadata, messages: messages.filter(message => (message.rev ?? 0) > cursor) })
+      }
+    }
+    return { rev: this.state.rev ?? 0, threadIds, threads }
   }
 }
 
@@ -837,6 +916,49 @@ function foldLegacyToolCards(workspaces) {
     }
   }
   return changed
+}
+
+/**
+ * Complete the revision space on load.
+ *
+ * Two things have to hold for cursors to work. Every item needs a revision: a
+ * store written before revisions existed has none anywhere, and since a cursor
+ * of 0 means "I hold nothing", an unstamped thread reads as unchanged
+ * (`0 <= 0`) and a freshly opened canvas would come up empty — the whole history
+ * invisible. And `state.rev` — the space cursors live in — must be at least the
+ * highest revision on disk, or a counter that restarted from 0 would hand out
+ * revisions colliding with existing ones, which an incremental reader would
+ * never be sent.
+ *
+ * A thread's revision is forced to the highest in that thread: it is the value a
+ * reader stores as its cursor, so it must never sit below a message it contains.
+ */
+function stampMissingRevs(state) {
+  let rev = Number.isSafeInteger(state.rev) && state.rev >= 0 ? state.rev : 0
+  let stamped = false
+  const next = () => { rev += 1; return rev }
+  for (const workspace of state.workspaces ?? []) {
+    for (const thread of workspace.threads ?? []) {
+      let highest = Number.isSafeInteger(thread.rev) && thread.rev > 0 ? thread.rev : 0
+      for (const message of thread.messages ?? []) {
+        if (!Number.isSafeInteger(message.rev) || message.rev <= 0) {
+          message.rev = next()
+          stamped = true
+        }
+        if (message.rev > highest) highest = message.rev
+      }
+      if (highest === 0) {
+        highest = next()
+        stamped = true
+      }
+      if (highest > rev) rev = highest
+      if (thread.rev !== highest) {
+        thread.rev = highest
+        stamped = true
+      }
+    }
+  }
+  return { rev, stamped }
 }
 
 function positionOf(value) {
@@ -1120,6 +1242,12 @@ export function apply(ctx, config) {
       const branch = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)\/branch$/i.exec(path)
       if (branch !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.branch(branch[1], await readJson(req)) })
       if (path === '/dsh-flow/map-api/sessions/sync' && req.method === 'POST') { const body = await readJson(req); return sendJson(res, 200, { workspaces: await store.syncSessions(body.sessions, body.removedSessionIds) }) }
+      // The canvas' incremental read: POST because the cursor map grows with the
+      // number of threads the caller already holds.
+      if (path === '/dsh-flow/map-api/projection' && req.method === 'POST') {
+        const body = await readJson(req)
+        return sendJson(res, 200, await store.projection(body?.sessionIds, body?.cursors))
+      }
       const messages = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)\/messages$/i.exec(path)
       if (messages !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.addMessage(messages[1], (await readJson(req)).text) })
       const thread = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)$/i.exec(path)

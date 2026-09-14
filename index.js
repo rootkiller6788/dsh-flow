@@ -286,6 +286,7 @@ export class WorkspaceStore {
       if (!Array.isArray(removedSessionIds) || removedSessionIds.some(item => typeof item !== 'string')) throw new InputError('removedSessionIds 必须是字符串数组')
       const blankIds = new Set(sessions.filter(item => item?.blank === true && typeof item.id === 'string').map(item => item.id))
       const removedIds = new Set(removedSessionIds)
+      const hidden = new Set(this.state.hiddenSessionIds)
       for (const workspace of this.state.workspaces) {
         if (workspace.kind !== 'dsh') continue
         workspace.threads = workspace.threads.filter(thread => !blankIds.has(thread.dshSessionId) && !removedIds.has(thread.dshSessionId))
@@ -296,7 +297,7 @@ export class WorkspaceStore {
         if (item.blank === true) continue
         // Canvas archiving is persistent UI state. A normal DSH list refresh
         // must not recreate a session that the user deliberately archived.
-        if (this.state.hiddenSessionIds.includes(item.id)) continue
+        if (hidden.has(item.id)) continue
         const workspace = this.dshWorkspace(item.cwd, 'DSH 任务')
         const session = { id: item.id, header: { meta: { cwd: item.cwd }, parentSession: typeof item.parentId === 'string' ? item.parentId : undefined }, title: typeof item.title === 'string' ? item.title : undefined, events: [] }
         const thread = this.dshThread(workspace, session)
@@ -336,15 +337,30 @@ export class WorkspaceStore {
   async removeThread(threadId) {
     return this.mutate(() => {
       const { workspace, thread } = this.locateThread(threadId)
+      // Archiving a node takes its descendants with it. The old form rescanned
+      // every thread once per generation of descendants to find the next layer;
+      // one parent→children index answers the same question in a single walk.
+      const children = new Map()
+      for (const item of workspace.threads) {
+        if (item.parentId === null) continue
+        const list = children.get(item.parentId)
+        if (list === undefined) children.set(item.parentId, [item])
+        else list.push(item)
+      }
       const removal = new Set([thread.id])
-      for (let changed = true; changed;) {
-        changed = false
-        for (const item of workspace.threads) {
-          if (item.parentId !== null && removal.has(item.parentId) && !removal.has(item.id)) { removal.add(item.id); changed = true }
+      const pending = [thread.id]
+      while (pending.length > 0) {
+        for (const child of children.get(pending.pop()) ?? []) {
+          if (removal.has(child.id)) continue
+          removal.add(child.id)
+          pending.push(child.id)
         }
       }
+      const hidden = new Set(this.state.hiddenSessionIds)
       for (const item of workspace.threads) {
-        if (removal.has(item.id) && item.dshSessionId !== null && !this.state.hiddenSessionIds.includes(item.dshSessionId)) this.state.hiddenSessionIds.push(item.dshSessionId)
+        if (!removal.has(item.id) || item.dshSessionId === null || hidden.has(item.dshSessionId)) continue
+        hidden.add(item.dshSessionId)
+        this.state.hiddenSessionIds.push(item.dshSessionId)
       }
       workspace.threads = workspace.threads.filter(item => !removal.has(item.id))
       workspace.updatedAt = new Date().toISOString()

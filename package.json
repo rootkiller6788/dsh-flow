@@ -18,7 +18,8 @@
     "assets",
     "theme.css",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "DESIGN.md"
   ],
   "scripts": {
     "build": "node scripts/check.js",

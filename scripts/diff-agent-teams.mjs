@@ -614,6 +614,69 @@ for (const [label, a, b] of [
   }
 }
 
+// ---------------------------------------------------------------------------
+// Delivery gate and resume
+// ---------------------------------------------------------------------------
+{
+  const task = (id, kind, status, extra = {}) => ({
+    id, subject: `s-${id}`, kind, status, dependencies: [], createdAt: 1, updatedAt: 1, ...extra,
+  })
+  const team = tasks => ({ name: 'T', id: 'T', captainSessionId: 's', createdAt: 1, members: [], taskSeq: tasks.length, tasks })
+
+  const scoped = { inScope: ['src/'], outOfScope: ['lib/'] }
+  const teams = [
+    ['empty', team([])],
+    ['work only', team([task('t1', 'work', 'completed')])],
+    ['impl open', team([task('t1', 'implementation', 'in_progress', scoped)])],
+    ['impl done, no review', team([task('t1', 'implementation', 'completed', { ...scoped, changedPaths: ['src/a.js'] })])],
+    ['impl done, review pending', team([task('t1', 'implementation', 'completed', { ...scoped, changedPaths: ['src/a.js'] }), task('t2', 'review', 'pending')])],
+    ['impl done, review pass', team([task('t1', 'implementation', 'completed', { ...scoped, changedPaths: ['src/a.js'] }), task('t2', 'review', 'completed', { verdict: 'pass' })])],
+    ['impl done, review no verdict', team([task('t1', 'implementation', 'completed', { ...scoped, changedPaths: ['src/a.js'] }), task('t2', 'review', 'completed')])],
+    ['impl changedPaths out of scope', team([task('t1', 'implementation', 'completed', { ...scoped, changedPaths: ['lib/x.js'] }), task('t2', 'review', 'completed', { verdict: 'pass' })])],
+    ['impl changedPaths illegal', team([task('t1', 'implementation', 'completed', { ...scoped, changedPaths: ['../x'] }), task('t2', 'review', 'completed', { verdict: 'pass' })])],
+    ['review failed, no repair', team([task('t1', 'review', 'failed', { reviewedTaskId: 't9' })])],
+    ['review failed, repair pending', team([task('t1', 'review', 'failed', { reviewedTaskId: 't9' }), task('t2', 'repair', 'pending', { sourceTaskId: 't9' })])],
+    ['review failed, repair for other', team([task('t1', 'review', 'failed', { reviewedTaskId: 't9' }), task('t2', 'repair', 'pending', { sourceTaskId: 't8' })])],
+    ['requirements failed, later round', team([task('t1', 'requirements', 'failed', { round: 1 }), task('t2', 'requirements', 'pending', { round: 2 })])],
+    ['requirements failed, same round', team([task('t1', 'requirements', 'failed', { round: 1 }), task('t2', 'requirements', 'pending', { round: 1 })])],
+    ['impl failed, repair', team([task('t1', 'implementation', 'failed'), task('t2', 'repair', 'pending', { sourceTaskId: 't1' })])],
+    ['impl failed, no repair', team([task('t1', 'implementation', 'failed')])],
+    ['cancelled is fine', team([task('t1', 'implementation', 'cancelled')])],
+    ['requirements completed no verdict', team([task('t1', 'requirements', 'completed')])],
+    ['verification open', team([task('t1', 'verification', 'pending')])],
+    ['real team', realTeam()],
+  ].filter(([, value]) => value !== undefined)
+
+  let mismatches = 0
+  for (const [label, value] of teams) {
+    const a = gates.canDeclareDelivery(clone(value))
+    const b = ours.canDeclareDelivery(clone(value))
+    if (show(a) !== show(b)) { mismatches++; differ(`canDeclareDelivery [${label}]`, `original ${show(a)}\n      ours     ${show(b)}`) }
+  }
+  if (mismatches === 0) console.log(`ok    canDeclareDelivery over ${teams.length} team shapes (failures with and without follow-ups, unscoped paths)`)
+  else failures++
+  checks++
+
+  // resumeTeamState
+  const resumeCases = [
+    ['not halted', team([]), 'why'],
+    ['halted, reason', team([]), 'why'],
+    ['halted, blank reason', team([]), '   '],
+    ['halted, empty reason', team([]), ''],
+    ['halted, undefined reason', team([]), undefined],
+    ['halted with haltedAt', { ...team([]), halted: true, haltedAt: 42 }, 'why'],
+  ]
+  let resumeMismatches = 0
+  for (const [label, value, reason] of resumeCases) {
+    const a = gates.resumeTeamState(clone(value), reason)
+    const b = ours.resumeTeamState(clone(value), reason)
+    if (show(a) !== show(b)) { resumeMismatches++; differ(`resumeTeamState [${label}]`, `original ${show(a)}\n      ours     ${show(b)}`) }
+  }
+  if (resumeMismatches === 0) console.log(`ok    resumeTeamState over ${resumeCases.length} cases`)
+  else failures++
+  checks++
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

@@ -923,19 +923,24 @@ export function apply(ctx, config) {
     }
   }
   const redirect = location => (_req, res) => { res.writeHead(302, { location }); res.end() }
-  // Static files are read from disk once and cached by mtime: repeated page
-  // loads stop hitting the filesystem for every asset.
+  // Static files — pages, modules, stylesheets and portraits alike — are read
+  // from disk once and cached by mtime: repeated page loads stop hitting the
+  // filesystem for every asset. One cache serves both routes; the key is the
+  // asset's own identity, never the request.
   const staticCache = new Map()
+  const cachedBody = async (key, path, compress) => {
+    const cached = staticCache.get(key)
+    const mtimeMs = (await stat(path)).mtimeMs
+    if (cached !== undefined && cached.mtimeMs === mtimeMs) return cached
+    const body = await readFile(path)
+    const entry = { mtimeMs, body, gzip: compress ? zlib.gzipSync(body) : null }
+    staticCache.set(key, entry)
+    return entry
+  }
   const file = (contentType, name) => async (_req, res) => {
-    const path = new URL(name, import.meta.url)
-    let entry = staticCache.get(name)
+    let entry
     try {
-      const mtimeMs = (await stat(path)).mtimeMs
-      if (entry === undefined || entry.mtimeMs !== mtimeMs) {
-        const body = await readFile(path)
-        entry = { mtimeMs, body, gzip: contentType.includes('text') ? zlib.gzipSync(body) : null }
-        staticCache.set(name, entry)
-      }
+      entry = await cachedBody(name, new URL(name, import.meta.url), contentType.includes('text'))
     } catch {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
       return res.end('not found')
@@ -979,10 +984,13 @@ export function apply(ctx, config) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
       return res.end('not found')
     }
-    readFile(new URL(`./assets/${name}`, import.meta.url)).then(
-      png => {
+    // Portraits are 1.5–1.9MB each, so serving them reads from disk once and
+    // then serves the cached buffer: 15 files, cached forever by mtime. No
+    // gzip — PNG is already compressed.
+    cachedBody(`assets/${name}`, new URL(`./assets/${name}`, import.meta.url), false).then(
+      entry => {
         res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=3600' })
-        res.end(png)
+        res.end(entry.body)
       },
       () => {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })

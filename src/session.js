@@ -18,21 +18,87 @@ function currentDshThread(threads = state.workspace?.threads ?? []) {
   const id = state.currentDsh?.id
   return typeof id === 'string' ? threads.find(thread => thread.dshSessionId === id) : undefined
 }
-async function threadsForDshWorkspace(workspace) {
-  if (workspace.sessionIds.length === 0) return []
-  const requested = new Set(workspace.sessionIds)
-  const projections = await Promise.all(state.summaries.map(summary => api(`/dsh-flow/map-api/workspaces/${summary.id}`)))
-  return projections.flatMap(projection => projection.workspace.threads.filter(thread => requested.has(thread.dshSessionId)))
+// Which revision of each thread the canvas already holds. An empty map is
+// exactly what a first read wants: the server answers with everything.
+const cursors = new Map()
+
+/**
+ * One incremental read of the session graph. The server replies with the threads
+ * belonging to these sessions and, per thread, only the messages this cursor map
+ * has not seen — so catching one new message costs that message rather than the
+ * whole workspace (measured 55x on a 40-turn thread), and a poll that finds
+ * nothing costs 76 bytes.
+ */
+async function fetchProjection(workspace, seen) {
+  if (workspace.sessionIds.length === 0) return { rev: 0, threadIds: [], threads: [] }
+  return api('/dsh-flow/map-api/projection', {
+    method: 'POST',
+    body: JSON.stringify({ sessionIds: workspace.sessionIds, cursors: Object.fromEntries(seen) }),
+  })
+}
+
+/**
+ * Fold one projection response into the threads already on the canvas.
+ *
+ * Pure — no state, no DOM — so the merge rules can be exercised on their own. A
+ * thread the server sent is either new (append it) or an update (take its
+ * metadata, then replace the messages it carried). `threadIds` is authoritative
+ * for what still exists: a thread can be archived, and the deletion cascade can
+ * take its children with it, without leaving a tombstone to react to.
+ */
+function applyProjection(threads, incoming, threadIds) {
+  const byId = new Map(threads.map(thread => [thread.id, thread]))
+  for (const update of incoming) {
+    const existing = byId.get(update.id)
+    if (existing === undefined) {
+      byId.set(update.id, update)
+      threads.push(update)
+      continue
+    }
+    const { messages, ...metadata } = update
+    Object.assign(existing, metadata)
+    mergeMessages(existing, messages)
+  }
+  if (!Array.isArray(threadIds)) return threads
+  const live = new Set(threadIds)
+  return threads.filter(thread => live.has(thread.id))
+}
+
+/**
+ * Messages arrive either new or updated: a tool result folds into the assistant
+ * message of its own turn, which was delivered turns ago. Replacing by id is what
+ * makes that second case work — appending would duplicate the message instead.
+ */
+function mergeMessages(thread, incoming) {
+  if (!Array.isArray(incoming) || incoming.length === 0) return
+  if (!Array.isArray(thread.messages)) {
+    thread.messages = [...incoming]
+    return
+  }
+  const at = new Map(thread.messages.map((message, index) => [message.id, index]))
+  for (const message of incoming) {
+    const index = at.get(message.id)
+    if (index === undefined) {
+      at.set(message.id, thread.messages.length)
+      thread.messages.push(message)
+    } else {
+      thread.messages[index] = message
+    }
+  }
 }
 async function openDshWorkspace(id, { renderAfter = true, preserveCamera = false } = {}) {
   const workspace = state.dshWorkspaces.find(item => item.id === id)
   if (workspace === undefined) return false
   const load = ++state.workspaceLoad
   state.selectedDshWorkspaceId = id
-  const threads = await threadsForDshWorkspace(workspace)
+  // A full read: an empty cursor map asks for everything, and the map is rebuilt
+  // from the answer because the thread list is about to be replaced wholesale.
+  cursors.clear()
+  const body = await fetchProjection(workspace, cursors)
   if (load !== state.workspaceLoad) return true
+  for (const thread of body.threads) cursors.set(thread.id, thread.rev)
   if (state.workspace?.id !== `dsh:${workspace.id}` && !preserveCamera) state.needsCenter = true
-  state.workspace = { id: `dsh:${workspace.id}`, title: workspace.title, cwd: workspace.path, threads }
+  state.workspace = { id: `dsh:${workspace.id}`, title: workspace.title, cwd: workspace.path, threads: body.threads }
   const currentThread = currentDshThread(state.workspace.threads)
   state.activeId = currentThread?.id ?? (state.workspace.threads.some(thread => thread.id === state.activeId) ? state.activeId : state.workspace.threads[0]?.id ?? null)
   if (currentThread !== undefined) revealConversationThread(conversationCards(state.workspace.threads), currentThread.id)
@@ -53,8 +119,14 @@ async function refreshSummaries({ renderAfter = true } = {}) {
   const current = state.workspace?.id
   if (state.selectedDshWorkspaceId === null && current !== null && !state.summaries.some(item => item.id === current)) state.workspace = null
   const selected = selectedDshWorkspace()
-  if (selected !== undefined && (changed || state.workspace === null)) await openDshWorkspace(selected.id, { renderAfter })
-  else if (state.workspace === null && state.summaries.length > 0) await openWorkspace(state.summaries[0].id)
+  // Only a workspace that is not the one on screen needs a full read. Content
+  // changes used to land here too — `updatedAt` moves on every message, so this
+  // re-read the whole workspace on every poll — but they belong to the
+  // incremental read now, and thread additions and removals come back through
+  // its threadIds. So `changed` no longer decides whether to re-read.
+  if (selected !== undefined && (state.workspace === null || state.workspace.id !== `dsh:${selected.id}`)) {
+    await openDshWorkspace(selected.id, { renderAfter })
+  } else if (state.workspace === null && state.summaries.length > 0) await openWorkspace(state.summaries[0].id)
   else if (renderAfter && changed && canReplaceView()) render()
   return changed
 }
@@ -68,12 +140,43 @@ async function openWorkspace(id, { renderAfter = true } = {}) {
   if (renderAfter && canReplaceView()) render()
   if (renderAfter && load === state.workspaceLoad && canReplaceView()) render()
 }
+/**
+ * Catch up on one incremental read and report whether anything moved, so the
+ * caller can decide to repaint. A quiet second costs a request with an empty
+ * body instead of the workspace document.
+ */
+async function syncProjection() {
+  const workspace = selectedDshWorkspace()
+  if (workspace === undefined || state.workspace === null) return false
+  if (state.workspace.id !== `dsh:${workspace.id}`) return false
+  const body = await fetchProjection(workspace, cursors)
+  for (const thread of body.threads) cursors.set(thread.id, thread.rev)
+  // Drop cursors for threads that no longer exist: archiving prunes them
+  // locally too, and a leftover cursor would suppress a real update if the id
+  // ever came back.
+  if (Array.isArray(body.threadIds)) {
+    const live = new Set(body.threadIds)
+    for (const id of [...cursors.keys()]) if (!live.has(id)) cursors.delete(id)
+  }
+  const before = state.workspace.threads.length
+  state.workspace.threads = applyProjection(state.workspace.threads, body.threads, body.threadIds)
+  if (!state.workspace.threads.some(thread => thread.id === state.activeId)) {
+    state.activeId = state.workspace.threads[0]?.id ?? null
+  }
+  return body.threads.length > 0 || state.workspace.threads.length !== before
+}
 async function refreshProjection() {
   const summariesChanged = await refreshSummaries({ renderAfter: false })
-  if (!summariesChanged || state.workspace === null || !canReplaceView()) return summariesChanged
-  if (state.selectedDshWorkspaceId !== null) await openDshWorkspace(state.selectedDshWorkspaceId)
-  else await openWorkspace(state.workspace.id)
-  return true
+  if (state.workspace === null || !canReplaceView()) return summariesChanged
+  // A manual workspace holds no DSH sessions to project incrementally, so it
+  // keeps the whole-document read.
+  if (state.selectedDshWorkspaceId === null) {
+    if (summariesChanged) await openWorkspace(state.workspace.id)
+    return summariesChanged
+  }
+  const synced = await syncProjection()
+  if (synced && canReplaceView()) render()
+  return summariesChanged || synced
 }
 
 function persistedMessagesFor(thread) { return thread.messages ?? [] }
@@ -334,4 +437,4 @@ function draftPlacement(cards) {
 }
 
 
-export { currentDshWorkspace, selectedDshWorkspace, currentDshThread, threadsForDshWorkspace, openDshWorkspace, openCurrentWorkspace, refreshSummaries, openWorkspace, refreshProjection, messagesFor, latestMessage, conversationCards, conversationGraphView, revealConversationThread, draftPlacement }
+export { currentDshWorkspace, selectedDshWorkspace, currentDshThread, openDshWorkspace, openCurrentWorkspace, refreshSummaries, openWorkspace, refreshProjection, messagesFor, latestMessage, conversationCards, conversationGraphView, revealConversationThread, draftPlacement }

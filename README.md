@@ -108,7 +108,7 @@ dsh-flow (纯 JS，无运行时依赖)
 │   ├── core.js         #   共享状态、几何常量、localStorage、宿主桥接、成员配色
 │   ├── markdown.js     #   Markdown 渲染（含 ■ 分节规范化）
 │   ├── relay.js        #   智能体信封解析（中继/成员消息/子代理通知）
-│   ├── session.js      #   会话投影数据层 + 轮次卡 + 分支图布局
+│   ├── session.js      #   会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
 │   ├── teams.js        #   团队轮询（实时→快照回退）+ 层级区域布局
 │   ├── scene.js        #   场景装配：需求时间轴 + 嵌套区域 + 类型化连线
 │   ├── view.js         #   相机、虚拟化挂载、节点渲染、检查器、主渲染
@@ -147,6 +147,7 @@ dsh-flow (纯 JS，无运行时依赖)
 | PATCH | `/map-api/threads/:id` | 改 `title` / `position` |
 | DELETE | `/map-api/threads/:id` | 删除节点**及其全部后代**，并隐藏对应 DSH 会话 |
 | POST | `/map-api/sessions/sync` | 用宿主会话列表对齐画布 `{ sessions, removedSessionIds }` |
+| POST | `/map-api/projection` | **增量读取**：`{ sessionIds, cursors }` → 只回这些会话所属的线程，且每个线程只带 `rev` 大于游标的消息；恒回 `threadIds` 供客户端剪除已归档节点 |
 | GET | `/map-api/teams` | 读取团队快照 `{ teams }`（未落盘时为空数组） |
 | POST | `/map-api/teams/snapshot` | 镜像团队状态 `{ teams }`（画布拉取成功时自动调用） |
 

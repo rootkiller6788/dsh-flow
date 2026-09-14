@@ -72,9 +72,14 @@ export function createFakeHost(options = {}) {
     ctx,
     calls,
 
-    /** Deliver an event to every listener registered for it. */
-    emit(event, payload) {
-      for (const handler of listeners.get(event) ?? []) handler(payload)
+    /**
+     * Deliver an event to every listener registered for it.
+     *
+     * `next` is forwarded so a waterfall event can be modelled: a listener
+     * that must delegate is only testable if it is handed something to call.
+     */
+    emit(event, payload, next) {
+      for (const handler of listeners.get(event) ?? []) handler(payload, next)
     },
 
     /** How many listeners are currently registered for an event. */

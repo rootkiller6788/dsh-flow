@@ -27,6 +27,26 @@ export function memberLabel(teamId, memberName) {
 }
 
 /**
+ * Recover the team and member a durable label names.
+ *
+ * This is how a cold-resumed child is recognised as a member: its session
+ * carries the label it was created with, and nothing else in a restarted
+ * process knows the relationship. The separator is `/` rather than `:`, which
+ * matters because the prefix itself ends in a colon — with `:` on both sides,
+ * a team id containing one would be unparseable.
+ *
+ * @param label - the durable label, or undefined.
+ * @returns `{ teamId, memberName }`, or undefined when this is not our child.
+ */
+export function parseMemberLabel(label) {
+  if (typeof label !== 'string' || !label.startsWith(MEMBER_LABEL_PREFIX)) return undefined
+  const identity = label.slice(MEMBER_LABEL_PREFIX.length)
+  const separator = identity.indexOf('/')
+  if (separator < 1 || separator === identity.length - 1) return undefined
+  return { teamId: identity.slice(0, separator), memberName: identity.slice(separator + 1) }
+}
+
+/**
  * Start one continuable member.
  *
  * Resolves when the child's inbox has accepted the initial prompt — not when

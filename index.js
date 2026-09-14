@@ -67,6 +67,87 @@ function lockIsStaleFrom(content, mtimeMs) {
   }
 }
 
+// --- Shared write discipline for dsh-flow's two data files -------------------
+// Both files are written whole by a process that may not be the only one
+// running, so both need the same three things: a sibling `.lock` while writing,
+// an atomic rename so no reader ever sees a partial file, and a way to tell the
+// user when a second instance already overwrote them. Kept here rather than
+// inline in each writer so the rule cannot drift between them.
+
+async function mtimeOf(file) {
+  try { return (await stat(file)).mtimeMs } catch { return null }
+}
+
+async function tryAcquireLock(lockFile) {
+  try {
+    await writeFile(lockFile, `${process.pid}\n`, { flag: 'wx' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function lockIsStale(lockFile) {
+  try {
+    const [content, stats] = await Promise.all([readFile(lockFile, 'utf8'), stat(lockFile)])
+    return lockIsStaleFrom(content, stats.mtimeMs)
+  } catch {
+    return false
+  }
+}
+
+/** Take `<file>.lock`, breaking a stale one; `onContended` runs once per hold-out. */
+async function acquireFileLock(file, onContended) {
+  const lockFile = `${file}.lock`
+  if (await tryAcquireLock(lockFile)) return true
+  if (await lockIsStale(lockFile)) {
+    // Breaking a stale lock means removing the file first: 'wx' would just fail
+    // again against the file still sitting there.
+    await unlink(lockFile).catch(() => {})
+    if (await tryAcquireLock(lockFile)) return true
+  }
+  onContended()
+  return false
+}
+
+async function releaseFileLock(file) {
+  await unlink(`${file}.lock`).catch(() => {})
+}
+
+/** Write `<file>.<pid>.tmp` then rename it into place. */
+async function atomicWrite(file, contents, options) {
+  const temporaryFile = `${file}.${process.pid}.tmp`
+  await writeFile(temporaryFile, contents, options)
+  await rename(temporaryFile, file)
+}
+
+/**
+ * Write while holding the lock, and report the two ways a second dsh web
+ * instance becomes visible: it moved the file's mtime since our last write, or
+ * it is holding the lock right now.
+ */
+async function guardedWrite(file, label, state, contents, options) {
+  const before = await mtimeOf(file)
+  if (state.lastKnownMtime !== null && before !== null && before !== state.lastKnownMtime) {
+    state.lastKnownMtime = before
+    if (!state.externalWarned) {
+      state.externalWarned = true
+      process.stderr.write(`dsh-flow: ${label} 已被另一个 dsh web 实例修改，本实例的写入可能覆盖其更改——请只运行一个实例\n`)
+    }
+  }
+  await acquireFileLock(file, () => {
+    if (state.lockWarned) return
+    state.lockWarned = true
+    process.stderr.write(`dsh-flow: 另一个 dsh web 实例正在写入 ${label}——请只运行一个实例，否则画布数据可能互相覆盖\n`)
+  })
+  try {
+    await atomicWrite(file, contents, options)
+    state.lastKnownMtime = await mtimeOf(file)
+  } finally {
+    await releaseFileLock(file)
+  }
+}
+
 /** JSON persistence for the canvas workspace graph. */
 export class WorkspaceStore {
   constructor(dataFile) {
@@ -328,30 +409,14 @@ export class WorkspaceStore {
 
   async save() {
     // Two dsh web instances sharing one profile clobber each other's canvas
-    // state. Warn loudly instead of silently losing work; a live lock held by
-    // another process or a file mtime that moved since our last write both
-    // indicate a second writer.
-    const before = await this.fileMtime()
-    if (this.lastKnownMtime !== null && before !== null && before !== this.lastKnownMtime) {
-      this.lastKnownMtime = before
-      if (!this.externalModWarned) {
-        this.externalModWarned = true
-        process.stderr.write('dsh-flow: workspaces.json 已被另一个 dsh web 实例修改，本实例的写入可能覆盖其更改——请只运行一个实例\n')
-      }
-    }
-    await this.acquireLock()
-    try {
-      const temporaryFile = `${this.dataFile}.${process.pid}.tmp`
-      await writeFile(temporaryFile, await gzip(`${JSON.stringify(this.state)}\n`, GZIP_OPTIONS))
-      await rename(temporaryFile, this.dataFile)
-      this.lastKnownMtime = (await stat(this.dataFile)).mtimeMs
-    } finally {
-      await this.releaseLock()
-    }
+    // state, so this goes through the shared guardedWrite: the lock, the atomic
+    // rename, and a warn-once when the file moved under us (this instance
+    // supplies its own mtime/warn state rather than keeping a parallel copy).
+    await guardedWrite(this.dataFile, 'workspaces.json', this, await gzip(`${JSON.stringify(this.state)}\n`, GZIP_OPTIONS))
   }
 
   async fileMtime() {
-    try { return (await stat(this.dataFile)).mtimeMs } catch { return null }
+    return mtimeOf(this.dataFile)
   }
 
   /**
@@ -447,42 +512,6 @@ export class WorkspaceStore {
     this.exitHandler = null
   }
 
-  /** Take an exclusive cross-process lock, breaking a stale one; warn when a live process holds it. */
-  async acquireLock() {
-    const lockFile = `${this.dataFile}.lock`
-    if (await this.tryAcquire(lockFile)) return
-    if (await this.lockIsStale(lockFile)) {
-      await unlink(lockFile).catch(() => {})
-      if (await this.tryAcquire(lockFile)) return
-    }
-    if (!this.lockWarned) {
-      this.lockWarned = true
-      process.stderr.write('dsh-flow: 另一个 dsh web 实例正在写入 workspaces.json——请只运行一个实例，否则画布数据可能互相覆盖\n')
-    }
-  }
-
-  async tryAcquire(lockFile) {
-    try {
-      await writeFile(lockFile, `${process.pid}\n`, { flag: 'wx' })
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  /** A lock is stale when its owner PID is gone or the lock file is older than the stale window. */
-  async lockIsStale(lockFile) {
-    try {
-      const [content, stats] = await Promise.all([readFile(lockFile, 'utf8'), stat(lockFile)])
-      return lockIsStaleFrom(content, stats.mtimeMs)
-    } catch {
-      return false
-    }
-  }
-
-  async releaseLock() {
-    await unlink(`${this.dataFile}.lock`).catch(() => {})
-  }
 
   workspace(workspaceId) {
     const workspace = this.state.workspaces.find(item => item.id === workspaceId)
@@ -989,6 +1018,9 @@ export function apply(ctx, config) {
   // snapshot write can strand a file the same way. The store swept its own file
   // during load; this covers the sibling.
   void store.sweepTempFiles(teamsFile).catch(reportProjectionFailure)
+  // Mtime/warn bookkeeping for the team snapshot's writer, the counterpart of
+  // the store's own fields.
+  const teamsWriteState = { lastKnownMtime: null, externalWarned: false, lockWarned: false }
   const replaySession = session => {
     // Forks inherit their parent's log. The canvas already represents that
     // history through the parent node, so only project the child's live tail.
@@ -1065,9 +1097,11 @@ export function apply(ctx, config) {
         const body = await readJson(req, MAX_SNAPSHOT_BYTES)
         if (!Array.isArray(body?.teams)) throw new InputError('teams 必须是数组')
         const teams = body.teams.map(slimTeam)
-        const temporaryFile = `${teamsFile}.${process.pid}.tmp`
-        await writeFile(temporaryFile, `${JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), teams })}\n`, 'utf8')
-        await rename(temporaryFile, teamsFile)
+        // Same cross-process discipline as workspaces.json. This write used to
+        // be tmp+rename only: atomic, but silent about a second instance, and
+        // the canvas POSTs it fire-and-forget on every poll — two instances
+        // would overwrite each other's team data with nothing to notice it by.
+        await guardedWrite(teamsFile, 'teams.json', teamsWriteState, `${JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), teams })}\n`, 'utf8')
         return sendJson(res, 200, { stored: teams.length })
       }
       return sendJson(res, 404, { error: '接口不存在' })

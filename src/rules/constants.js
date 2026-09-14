@@ -70,6 +70,34 @@ export const GATE_TEST_CONTRACT = /needs[_ ]revision|拒绝路径|verdict\s*=\s*
 /** Statuses in which a planned follow-up is already scheduled and will run. */
 export const OPEN_FOLLOW_UP_STATUSES = Object.freeze(['pending', 'claimed', 'in_progress'])
 
+
+// ---------------------------------------------------------------------------
+// Named team-profile templates
+// ---------------------------------------------------------------------------
+/** Hard cap on named profiles so the usage prompt cannot grow without bound. */
+export const MAX_TEAM_PROFILES = 16
+/** Hard cap on seed tasks per profile. The software-delivery example has 13. */
+export const MAX_PROFILE_TASKS = 32
+/** Protocol excerpt length in the usage / prompt listing. */
+export const PROFILE_PROTOCOL_PROMPT_LIMIT = 240
+
+/** Keys a profile record may carry; anything else is rejected. */
+export const PROFILE_KEYS = Object.freeze([
+  'description', 'protocol', 'executionPrompt', 'fallback', 'members', 'tasks', 'taskPlanning', 'reviewPolicy',
+])
+/** Keys a profile's review policy may carry. */
+export const REVIEW_POLICY_KEYS = Object.freeze([
+  'requirementsMinRounds', 'requirementsMaxRounds', 'codeMaxRounds', 'maxRepairAttempts', 'requiredReviewers',
+])
+/** Keys a profile member row may carry. `reasoning_effort` is snake_case here. */
+export const MEMBER_KEYS = Object.freeze([
+  'name', 'role', 'provider', 'model', 'reasoning_effort', 'executionPrompt', 'fallback',
+])
+/** Keys a profile's model-fallback row may carry. */
+export const FALLBACK_KEYS = Object.freeze(['provider', 'model'])
+/** Keys a profile's seed task row may carry. */
+export const TASK_KEYS = Object.freeze(['id', 'subject', 'description', 'assignee', 'dependencies'])
+
 /** Conclusion of a review / requirements task. Only `pass` may complete those kinds. */
 export const REVIEW_VERDICTS = Object.freeze(['pass', 'needs_revision', 'reject'])
 

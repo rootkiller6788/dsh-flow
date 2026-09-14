@@ -833,6 +833,106 @@ for (const [label, a, b] of [
   }
 }
 
+// ---------------------------------------------------------------------------
+// Profile invocation parsing
+// ---------------------------------------------------------------------------
+{
+  const invocations = [
+    '', '   ', 'build a thing', '--profile solo build a thing', '--profile=solo build a thing',
+    'profile=solo build a thing', '--profile "solo" build a thing', "--profile 'solo' build a thing",
+    '--profile  solo   spaced   goal', '--profile solo --profile other goal',
+    '--profile', '--profile=', 'profile=', '--profile=""', "--profile=''",
+    'goal with --profile inside', '--profile a', '"quoted goal"', '--profile="a b" goal',
+    '--profileX goal', '--prof goal', 'goal --profile x',
+  ]
+  let mismatches = 0
+  for (const raw of invocations) {
+    let expected, actual
+    try { expected = profiles.parseProfileInvocation(raw) } catch (error) { expected = `THREW:${error.message}` }
+    try { actual = ours.parseProfileInvocation(raw) } catch (error) { actual = `THREW:${error.message}` }
+    if (show(expected) !== show(actual)) { mismatches++; differ(`parseProfileInvocation(${JSON.stringify(raw)})`, `${show(expected)} vs ${show(actual)}`) }
+  }
+  if (mismatches === 0) console.log(`ok    parseProfileInvocation over ${invocations.length} invocations`)
+  else failures++
+  checks++
+
+  same('MAX_TEAM_PROFILES', profiles.MAX_TEAM_PROFILES, ours.MAX_TEAM_PROFILES)
+  same('MAX_PROFILE_TASKS', profiles.MAX_PROFILE_TASKS, ours.MAX_PROFILE_TASKS)
+  same('PROFILE_PROTOCOL_PROMPT_LIMIT', profiles.PROFILE_PROTOCOL_PROMPT_LIMIT, ours.PROFILE_PROTOCOL_PROMPT_LIMIT)
+  for (const [label, value] of [['captain', { taskPlanning: 'captain' }], ['seed', { taskPlanning: 'seed' }], ['unset', {}], ['undefined', undefined], ['bogus', { taskPlanning: 'bogus' }]]) {
+    same(`resolveProfileTaskPlanning(${label})`, profiles.resolveProfileTaskPlanning(value), ours.resolveProfileTaskPlanning(value))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seed-task topological order
+// ---------------------------------------------------------------------------
+// `topoSortTasks` is module-private in the original, so there is nothing to
+// diff against. Its contract is asserted directly instead: a valid topological
+// order is exactly what "every dependency comes first" means, and that is a
+// stronger statement than agreement on a handful of inputs.
+{
+  const seed = (id, dependencies, sourceIndex) => ({ id, subject: id, dependencies, sourceIndex })
+  const cases = [
+    ['empty', []],
+    ['single', [seed('a', [], 0)]],
+    ['linear', [seed('c', ['b'], 2), seed('b', ['a'], 1), seed('a', [], 0)]],
+    ['diamond', [seed('d', ['b', 'c'], 3), seed('c', ['a'], 2), seed('b', ['a'], 1), seed('a', [], 0)]],
+    ['independent keep source order', [seed('z', [], 2), seed('y', [], 0), seed('x', [], 1)]],
+    ['reverse source order', [seed('a', ['b'], 0), seed('b', ['c'], 1), seed('c', [], 2)]],
+    ['two roots', [seed('a', [], 0), seed('b', [], 1), seed('c', ['a', 'b'], 2)]],
+  ]
+
+  let problems = 0
+  for (const [label, tasks] of cases) {
+    let ordered
+    try { ordered = ours.topoSortTasks(clone(tasks)) } catch (error) { problems++; differ(`topoSortTasks [${label}] threw`, error.message); continue }
+    if (ordered.length !== tasks.length) { problems++; differ(`topoSortTasks [${label}] length`, `${ordered.length} vs ${tasks.length}`) }
+    const position = new Map(ordered.map((task, index) => [task.id, index]))
+    for (const task of ordered) {
+      for (const dependency of task.dependencies) {
+        if ((position.get(dependency) ?? -1) > position.get(task.id)) {
+          problems++
+          differ(`topoSortTasks [${label}] order`, `${task.id} placed before its dependency ${dependency}`)
+        }
+      }
+    }
+    // Ties break by declared position, so the order is reproducible.
+    const roots = ordered.filter(task => task.dependencies.length === 0).map(task => task.sourceIndex)
+    if (roots.join(',') !== [...roots].sort((a, b) => a - b).join(',')) {
+      problems++
+      differ(`topoSortTasks [${label}] stability`, `roots out of source order: ${roots.join(',')}`)
+    }
+  }
+
+  const cycleCases = [
+    ['self', [seed('a', ['a'], 0)]],
+    ['two', [seed('a', ['b'], 0), seed('b', ['a'], 1)]],
+    ['three', [seed('a', ['b'], 0), seed('b', ['c'], 1), seed('c', ['a'], 2)]],
+    ['cycle plus tail', [seed('a', ['b'], 0), seed('b', ['a'], 1), seed('c', ['a'], 2)]],
+  ]
+  for (const [label, tasks] of cycleCases) {
+    let threw = false
+    let message = ''
+    try { ours.topoSortTasks(clone(tasks)) } catch (error) { threw = true; message = error.message }
+    if (!threw || !message.includes('dependency cycle')) {
+      problems++
+      differ(`topoSortTasks cycle [${label}]`, threw ? `message was ${message}` : 'did not throw')
+    }
+  }
+
+  let unknownThrew = false
+  try { ours.topoSortTasks([seed('a', ['ghost'], 0)]) } catch (error) {
+    unknownThrew = error.message === 'profile task "a" depends on unknown task "ghost"'
+  }
+  if (!unknownThrew) { problems++; differ('topoSortTasks unknown dependency', 'expected the original message naming both tasks') }
+
+  if (problems === 0) {
+    console.log(`ok    topoSortTasks over ${cases.length} graphs by property, ${cycleCases.length} cycles rejected`)
+    checks++
+  }
+}
+
 console.log(failures === 0
   ? `\ndsh-flow: ${checks} differential checks agree with dsh-agent-teams`
   : `\ndsh-flow: ${failures} of ${checks} differential checks disagree`)

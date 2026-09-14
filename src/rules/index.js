@@ -22,6 +22,8 @@ export {
   TASK_STATUS, TERMINAL_TASK_STATUSES, TASK_KINDS, REVIEW_VERDICTS, FINDING_SEVERITIES,
   MEMBER_STATUS, CAPTAIN_KEY, CAPTAIN_ASSIGNEE, MAILBOX_DELIVERY_LEASE_MS, QUALITY_KINDS, WRITE_KINDS, OPEN_STATUSES,
   DEFAULT_REVIEW_ACCEPTANCE, DEFAULT_REVIEW_OBJECTIVE, OPEN_FOLLOW_UP_STATUSES,
+  MAX_TEAM_PROFILES, MAX_PROFILE_TASKS, PROFILE_PROTOCOL_PROMPT_LIMIT,
+  PROFILE_KEYS, REVIEW_POLICY_KEYS, MEMBER_KEYS, FALLBACK_KEYS, TASK_KEYS,
   TASK_TRANSITIONS, transitionError,
 } from './constants.js'
 export { sha256Hex } from './sha256.js'
@@ -40,3 +42,4 @@ export { openHighFindings, acceptanceCovered, verifyCovered, evaluateQualityComp
 export { canDeclareDelivery, resumeTeamState, describeQualityLoop } from './delivery.js'
 export { buildCoverageMatrix } from './coverage.js'
 export { looksLikeGateTestContract, sanitizeReviewObjective, sanitizeReviewAcceptance, unresolvedFindings, findingKey, schedulableAssignee, countRepairAttempts, hasOpenFollowUp, planQualityFollowUp } from './followup.js'
+export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, parseProfileInvocation, resolveProfileTaskPlanning } from './profiles.js'

@@ -728,10 +728,20 @@ export class WorkspaceStore {
   foldToolProcess(thread, event) {
     const at = new Date(event.time).toISOString()
     const data = event.data ?? {}
-    const target = [...thread.messages].reverse().find(message =>
-      (message.kind === 'assistant' || message.kind === 'error')
-      && (message.turn === data.turn && message.step === data.step
-        || message.turn === undefined && message.step === undefined))
+    // The newest assistant/error message of this turn/step, or the newest one
+    // with no turn/step at all. Walked backwards rather than
+    // `[...messages].reverse().find(...)`, which copied the whole message list
+    // on every tool event — a 235-message thread allocated a 235-element array
+    // per call, for an answer that is almost always in the last few entries.
+    let target
+    for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+      const message = thread.messages[index]
+      if (message.kind !== 'assistant' && message.kind !== 'error') continue
+      if (message.turn === data.turn && message.step === data.step || message.turn === undefined && message.step === undefined) {
+        target = message
+        break
+      }
+    }
     const process = target === undefined ? (thread.pendingProcess ??= []) : (target.process ??= [])
     const callId = String(event.type === 'tool/call' ? data.callId : data.message?.source?.callId ?? '')
     const entry = process.find(item => item.callId === callId)

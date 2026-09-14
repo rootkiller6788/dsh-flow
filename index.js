@@ -793,6 +793,24 @@ function sendFile(res, contentType, body, etag) {
   res.end(res.req?.method === 'HEAD' ? undefined : body)
 }
 
+// Fields the live agent-teams state carries that no canvas view reads. The
+// snapshot is the canvas' own copy — the one that keeps team regions rendering
+// after agent-teams is gone — so it stores what it renders and nothing else.
+// Measured on a real 4-member team: `executionPrompt` is 93% of a member's
+// bytes and a task's `description` 74% of its, so dropping them takes the
+// snapshot from ~13KB to ~3KB.
+const UNRENDERED_TEAM_FIELDS = new Set(['description', 'executionPrompt', 'provider', 'reasoningEffort'])
+function slimTeam(team) {
+  const strip = source => Object.fromEntries(Object.entries(source ?? {}).filter(([key]) => !UNRENDERED_TEAM_FIELDS.has(key)))
+  const slim = strip(team)
+  // Members and tasks are the two array fields that carry the bulk; strip the
+  // same fields inside them.
+  for (const [key, value] of Object.entries(slim)) {
+    if (Array.isArray(value)) slim[key] = value.map(entry => entry !== null && typeof entry === 'object' ? strip(entry) : entry)
+  }
+  return slim
+}
+
 /** The unified agent canvas: one page, one engine, one graph. */
 function canvasPage() {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/theme.css"></head><body><div id="app"></div><script src="/dsh-flow/engine.js"></script><script type="module" src="/dsh-flow/src/canvas.js"></script></body></html>`
@@ -890,11 +908,11 @@ export function apply(ctx, config) {
       if (path === '/dsh-flow/map-api/teams/snapshot' && req.method === 'POST') {
         const body = await readJson(req)
         if (!Array.isArray(body?.teams)) throw new InputError('teams 必须是数组')
+        const teams = body.teams.map(slimTeam)
         const temporaryFile = `${teamsFile}.${process.pid}.tmp`
-        await writeFile(temporaryFile, `${JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), teams: body.teams })}
-`, 'utf8')
+        await writeFile(temporaryFile, `${JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), teams })}\n`, 'utf8')
         await rename(temporaryFile, teamsFile)
-        return sendJson(res, 200, { stored: body.teams.length })
+        return sendJson(res, 200, { stored: teams.length })
       }
       return sendJson(res, 404, { error: '接口不存在' })
     } catch (error) {

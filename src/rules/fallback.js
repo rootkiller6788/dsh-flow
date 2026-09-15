@@ -56,8 +56,15 @@ export function selectFallbackRoute(current, fallback, failureCode, alreadySwitc
  * the pool. A caller revoking work on purpose (a reassignment, a removal) passes
  * its own target.
  *
+ * The rollback always states who holds the task afterwards — `failure.assignee`
+ * may be `null` to say nobody does — which generation it is on, and which
+ * capability, if any, comes back with it. Those are not decoration: they are
+ * what lets the projection reproduce the record the caller is about to write,
+ * so `reconcile.js` sees no leftover difference to complain about — and what
+ * keeps a restored parked generation from reading as a brand new one.
+ *
  * @param task - the task whose attempt failed.
- * @param failure - `{ reason, code }`.
+ * @param failure - `{ reason, code, toStatus, assignee, attempt, restoredAttemptId }`.
  * @param at - epoch milliseconds.
  * @param seq - the sequence number of the first event; the second follows it.
  * @returns the events to append, in order.
@@ -89,7 +96,10 @@ export function attemptFailureEvents(task, failure, at, seq) {
       id: task.id,
       toStatus: failure.toStatus ?? 'pending',
       reason: failure.reason,
+      assignee: failure.assignee ?? null,
+      attempt: failure.attempt ?? task.attempt ?? 0,
       ...attemptId === undefined ? {} : { attemptId },
+      ...failure.restoredAttemptId === undefined ? {} : { restoredAttemptId: failure.restoredAttemptId },
       ...failure.code === undefined ? {} : { code: failure.code },
     })
   }

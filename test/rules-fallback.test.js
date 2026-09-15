@@ -71,7 +71,22 @@ test('a failed attempt leaves both facts, in order', () => {
   assert.deepEqual(events[1], {
     type: 'task.rolled_back', at: 500, seq: 8,
     id: 't1', toStatus: 'pending', reason: 'member went idle', attemptId: 'att-1', code: 'MEMBER_IDLE',
+    // `assignee: null` is the rollback saying nobody holds the task now. An
+    // absent key would mean the event had nothing to say about the owner, and
+    // the two are different states: the first is a task back in the pool.
+    assignee: null, attempt: 0,
   })
+})
+
+test('a rollback names the generation and owner it restores', () => {
+  // A recovered generation that fails puts the previous one back, so the
+  // projection has to be told which one that was.
+  const events = attemptFailureEvents(task({ attempt: 3 }), {
+    reason: 'unreachable', toStatus: 'in_progress', assignee: '建模手', attempt: 2,
+  }, 1, 0)
+  assert.equal(events[1].assignee, '建模手')
+  assert.equal(events[1].attempt, 2)
+  assert.equal(events[1].toStatus, 'in_progress')
 })
 
 test('a task that never started an attempt records only the rollback', () => {

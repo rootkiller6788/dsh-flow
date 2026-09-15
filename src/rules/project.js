@@ -12,8 +12,15 @@ import { sanitizeKey } from './identifiers.js'
 
 const clone = value => structuredClone(value)
 
-/** Apply one event to a mutable draft, returning the next draft. */
-function reduce(draft, event) {
+/**
+ * Apply one event to a draft, returning the next draft.
+ *
+ * Exported because it is the single definition of what an event *means*: the
+ * fold in `projectTeam` and the verification in `reconcile.js` both have to
+ * agree with it exactly, and two copies of this switch would be two chances for
+ * the log and the record to drift apart.
+ */
+export function reduceTeamEvent(draft, event) {
   switch (event.type) {
     case 'team.created':
       return {
@@ -96,6 +103,9 @@ function reduce(draft, event) {
       }
 
     case 'task.attempt_started':
+      // Mirrors `activateTaskAttempt` field for field: an activated generation
+      // clears the previous output and the handoff gap marker, because the gap
+      // it marked is now closed by work that has started.
       return {
         ...draft,
         tasks: draft.tasks.map(task => task.id === event.id
@@ -105,7 +115,9 @@ function reduce(draft, event) {
               attempt: event.attempt ?? (task.attempt ?? 0) + 1,
               attemptId: event.attemptId,
               ...event.assignee === undefined ? {} : { assignee: event.assignee },
+              handoffId: undefined,
               reassigning: false,
+              output: undefined,
               updatedAt: event.at,
             }
           : task),
@@ -123,13 +135,26 @@ function reduce(draft, event) {
       }
 
     case 'task.rolled_back':
+      // A rollback takes the work back. `assignee` says who, if anyone, holds it
+      // now: absent means the event did not speak to it, `null` means the task
+      // returned to the unassigned pool, and a name restores the owner the
+      // failed generation replaced. The distinction is not decoration — a task
+      // left pointing at a member that could not be reached would be handed
+      // straight back to it as a "recovery" on the next kick.
+      //
+      // `restoredAttemptId` is the capability that comes back with the owner. It
+      // is a separate field from `attemptId`, which names the failed generation
+      // and is here to say *what* was revoked — a reader that conflated the two
+      // would see a parked generation restored as a fresh start.
       return {
         ...draft,
         tasks: draft.tasks.map(task => task.id === event.id
           ? {
               ...task,
               status: event.toStatus,
-              attemptId: undefined,
+              attemptId: event.restoredAttemptId,
+              ...event.attempt === undefined ? {} : { attempt: event.attempt },
+              ...'assignee' in event ? { assignee: event.assignee ?? undefined } : {},
               reassigning: false,
               updatedAt: event.at,
             }
@@ -169,8 +194,8 @@ export function projectTeam(events) {
   let draft
   let archived = false
   for (const event of events) {
-    if (event.type === 'team.created') draft = reduce(draft ?? {}, event)
-    else if (draft !== undefined) draft = reduce(draft, event)
+    if (event.type === 'team.created') draft = reduceTeamEvent(draft ?? {}, event)
+    else if (draft !== undefined) draft = reduceTeamEvent(draft, event)
     if (event.type === 'team.archived') archived = true
   }
   if (draft === undefined) return undefined

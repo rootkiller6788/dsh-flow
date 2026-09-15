@@ -64,7 +64,19 @@ const PAYLOAD_SCHEMA = Object.freeze({
   'task.transitioned': { required: { id: isText, from: isText, to: isText }, optional: ['at'] },
   'task.attempt_started': { required: { id: isText, attemptId: isText }, optional: ['attempt', 'assignee'] },
   'task.attempt_failed': { required: { id: isText, attemptId: isText, reason: isText }, optional: ['code'] },
-  'task.rolled_back': { required: { id: isText, toStatus: isText, reason: isText }, optional: ['attemptId', 'code'] },
+  // `attempt`, `assignee` and `restoredAttemptId` are here because a rollback
+  // *restores* them: an attempt that failed on a recovered generation puts the
+  // previous generation back, and a log that did not carry the restored values
+  // would leave the projection disagreeing with the record the runtime holds —
+  // or, worse, would make the restored capability look like a new generation to
+  // a reader diffing the two. `assignee` is the one nullable field in the
+  // schema: `null` means the task returned to the unassigned pool, which an
+  // absent key cannot say, since absent means "this event is not speaking to
+  // the assignee at all".
+  'task.rolled_back': {
+    required: { id: isText, toStatus: isText, reason: isText },
+    optional: ['attemptId', 'restoredAttemptId', 'code', 'attempt', 'assignee'],
+  },
   'task.completed': { required: { id: isText }, optional: ['verdict', 'acceptanceResults', 'changedPaths', 'output'] },
   'message.sent': { required: { from: isText, to: isText, content: isAnyString }, optional: ['id', 'ts'] },
   'message.delivered': { required: { id: isText }, optional: ['deliveredAt'] },

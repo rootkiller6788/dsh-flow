@@ -217,7 +217,13 @@ export function installTeamScheduler(ctx, options) {
         reason: failure.reason,
         ...failure.code === undefined ? {} : { code: failure.code },
         toStatus: restored ? ticket.previousStatus : 'pending',
-        assignee: restored ? ticket.previousAssignee ?? null : null,
+        // Who holds the task *afterwards*, and it is the same answer in both
+        // branches: the plan's assignee. Returning it to the unassigned pool
+        // instead would read differently to `nextReadyTask`, which prefers a
+        // member's own assignment and only then the pool — so dropping the owner
+        // would let any member pick up a task the profile named for somebody
+        // else, and a seeded plan is exactly where that matters.
+        assignee: ticket.previousAssignee ?? null,
         ...restored && ticket.previousAttempt !== undefined ? { attempt: ticket.previousAttempt } : {},
         ...restored && ticket.previousAttemptId !== undefined
           ? { restoredAttemptId: ticket.previousAttemptId }
@@ -245,7 +251,7 @@ export function installTeamScheduler(ctx, options) {
     })
   }
 
-  return {
+  const runtime = {
     /** Dispatch to every member of a team, in order. */
     async kickTeam(teamId, suppliedCaptain) {
       const team = await deps.readTeam(teamId)
@@ -287,11 +293,53 @@ export function installTeamScheduler(ctx, options) {
     },
 
     /**
+     * Record that a member's turn died, and take its work back.
+     *
+     * Distinct from a failed dispatch, and the difference is why this is not
+     * folded into it. That one means the work never reached the member; this one
+     * means it did, the turn ran, and the turn ended in a failure the host could
+     * not recover from. The attempt is lost either way, so the same rollback
+     * applies — but the recorded reason differs, because a reader diagnosing the
+     * team has to be able to tell "we could not hand this over" from "it was
+     * handed over and died there".
+     *
+     * Doing nothing when no attempt is open is the ordinary case, not a
+     * degenerate one: a member whose turn failed while it held no work has
+     * nothing to give back, and minting an attempt to roll back would put a
+     * failure in the log that no task ever had.
+     *
+     * The kick is the point of recording it here rather than leaving it to an
+     * idle edge. The final-error event precedes driver quiescence, so the idle
+     * the scheduler would otherwise wait for may never arrive.
+     */
+    async failMemberTurn(teamId, memberName, code) {
+      const team = await deps.readTeam(teamId)
+      const member = team?.members.find(candidate => candidate.name === memberName && candidate.status !== 'removed')
+      const owned = team === undefined || member === undefined ? undefined : ownedOpenTask(team.tasks, memberName)
+      if (owned?.attemptId === undefined) return
+      await rollbackDispatch({
+        teamId,
+        taskId: owned.id,
+        attemptId: owned.attemptId,
+        memberName,
+        memberId: member.id,
+        recoveredOwned: false,
+        previousAssignee: owned.assignee,
+      }, { reason: 'member turn failed', ...code === undefined ? {} : { code } })
+      await this.kickTeam(teamId)
+    },
+
+    /**
      * Record that a member's agent went idle, which parks its current attempt.
      *
      * Called from the `agent/status` listener. Parking here is what stops the
      * next kick from treating a still-open attempt as recoverable and starting
      * a second one.
+     *
+     * A member that went idle owning nothing is *unparked*, not left alone. The
+     * marker means "this process has seen this generation parked"; keeping it
+     * for a member that no longer holds anything would make the next task it
+     * takes look already-parked, and it would never be recovered.
      */
     noteMemberIdle(sessionId, team) {
       const member = team?.members.find(candidate => candidate.id === sessionId)
@@ -299,8 +347,8 @@ export function installTeamScheduler(ctx, options) {
       // The capability lives on the *task*, not on the member: a member is a
       // person, an attempt is a job. Parking requires finding the one it owns.
       const owned = ownedOpenTask(team.tasks, member.name)
-      if (owned?.attemptId === undefined) return
-      parkedAttempts.set(sessionId, owned.attemptId)
+      if (owned?.attemptId === undefined) parkedAttempts.delete(sessionId)
+      else parkedAttempts.set(sessionId, owned.attemptId)
     },
 
     /** Forget everything parked for a session that no longer participates. */
@@ -313,4 +361,55 @@ export function installTeamScheduler(ctx, options) {
       return parkedAttempts.size
     },
   }
+
+  /**
+   * Bring the durable member status, and the parking marker, in line with what
+   * the host says a member is doing.
+   *
+   * The recorded status is written because the canvas and the captain read it,
+   * and it is the one field the runtime owns rather than derives — a member that
+   * ended its turn would otherwise read `working` forever.
+   */
+  async function syncMemberStatus(agent, status) {
+    if (agent === undefined || (status !== 'running' && status !== 'idle')) return
+    const teamId = await deps.findTeamByParticipant(agent.id)
+    if (teamId === undefined) return
+    const team = await deps.readTeam(teamId)
+    const member = team?.members.find(candidate => candidate.id === agent.id && candidate.status !== 'removed')
+    if (team === undefined || member === undefined) return
+
+    if (status === 'running') parkedAttempts.delete(agent.id)
+    else runtime.noteMemberIdle(agent.id, team)
+
+    const next = status === 'running' ? 'working' : 'idle'
+    if (member.status !== next) {
+      // Re-read under the lock: the record this decision was made from may be
+      // several events old by the time the write is allowed to happen, and a
+      // member that has since been removed must not be brought back to life.
+      await deps.withTeamLock(teamId, async () => {
+        const fresh = await deps.readTeam(teamId)
+        const current = fresh?.members.find(candidate => candidate.id === agent.id && candidate.status !== 'removed')
+        if (fresh === undefined || current === undefined || current.status === next) return
+        current.status = next
+        await deps.writeTeam(fresh)
+      })
+    }
+    // Idle is the edge work comes back on. There is no timer anywhere in this
+    // scheduler, so if nothing kicks here a task that a dead turn gave back
+    // waits for a human to notice — and a member that finished its task never
+    // gets the next one.
+    if (status === 'idle') await runtime.kickMember(teamId, member.name)
+  }
+
+  // Registered as an effect so the host owns the teardown, the way it owns every
+  // other listener this plugin contributes: unloading removes it, and a
+  // scheduler whose plugin is gone stops reacting to agents it no longer owns.
+  const disposeStatus = ctx.on?.('agent/status', payload => {
+    void syncMemberStatus(payload?.agent, payload?.status).catch(error => {
+      ctx.logger?.warn?.(`dsh-flow: member status sync failed for ${String(payload?.agent?.id)}: ${String(error)}`)
+    })
+  })
+  ctx.effect?.(() => () => disposeStatus?.(), 'dsh-flow: member status sync')
+
+  return runtime
 }

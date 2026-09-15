@@ -30,6 +30,7 @@ const CAPTAIN = 'sess-cap'
  */
 function fakeAgent(id, options = {}) {
   const restricted = []
+  const listeners = new Map()
   return {
     id,
     status: options.status ?? 'idle',
@@ -46,8 +47,19 @@ function fakeAgent(id, options = {}) {
     ctx: {
       tools: { restrict: request => { restricted.push(request); return () => {} } },
       effect: execute => execute(),
+      // Agent-scoped events, which is where a member's own failure lands: the
+      // host reports a turn that died to that member, not to the plugin.
+      on(event, handler) {
+        if (!listeners.has(event)) listeners.set(event, new Set())
+        listeners.get(event).add(handler)
+        return () => listeners.get(event)?.delete(handler)
+      },
     },
     restricted,
+    /** Deliver an agent-scoped event, the way the host would. */
+    async emit(event, payload) {
+      for (const handler of [...(listeners.get(event) ?? [])]) await handler(payload)
+    },
   }
 }
 
@@ -56,6 +68,7 @@ function fakeHost(options = {}) {
   const agents = new Map([[CAPTAIN, fakeAgent(CAPTAIN, options)]])
   const calls = { spawned: [], delivered: [], interrupted: [], kicked: [], steered: [], restricted: [], warnings: [] }
   const listeners = new Map()
+  const admissions = []
   let children = 0
 
   const ctx = {
@@ -74,8 +87,17 @@ function fakeHost(options = {}) {
         children += 1
         const childId = `child-${children}`
         calls.spawned.push({ childId, label: spec.label })
-        agents.set(childId, fakeAgent(childId, { label: spec.label }))
+        const child = fakeAgent(childId, { label: spec.label })
+        agents.set(childId, child)
+        // The host admits a continuable child, so the member has its own
+        // runtime before its first request rather than after something notices
+        // it is missing.
+        for (const setup of admissions) setup(child.ctx, child)
         return { childId, messageId: `msg-${children}` }
+      },
+      registerContinuableSetup(setup) {
+        admissions.push(setup)
+        return () => { admissions.length = 0 }
       },
       // Delivery starts the member's turn, and a member that is in a turn is
       // not idle. Modelling that is what the scheduler's availability check
@@ -255,6 +277,72 @@ test('a member completes its work, and the dependency unblocks the next task', a
   const { ctx } = fakeHost()
   const reopened = installFlowKernel(ctx, { stateDir, profiles: PROFILES, runner: 'manual' })
   assert.deepEqual((await reopened.store.service.readTeam(created.teamId)).tasks[1].status, 'claimed')
+})
+
+test('a member whose turn died has its work given back, and handed out again', async t => {
+  // The whole loop, through the real kernel. A turn that ends in a terminal
+  // failure leaves an attempt nobody holds; the scheduler's other recovery path
+  // waits for an idle edge, and a turn that errored out may never produce one
+  // on its own — so the failure is recorded by the member's own runtime, and the
+  // idle edge is what actually picks the work back up.
+  const { tool, captain, agents, emit, goIdle, kernel } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const before = await readBack(kernel, created.teamId)
+  assert.equal(before.tasks[0].status, 'claimed')
+
+  // The turn ran and died.
+  const member = agents.get('child-1')
+  await member.emit('agent/error', { error: { code: 'SERVER_ERROR' } })
+
+  const rolled = await readBack(kernel, created.teamId)
+  assert.equal(rolled.tasks[0].status, 'pending', 'the lost attempt is given back to the pool')
+  assert.equal(rolled.tasks[0].attemptId, undefined)
+
+  // The host reports the member idle, which is the edge work comes back on.
+  goIdle('child-1')
+  emit('agent/status', { agent: member, status: 'idle' })
+  await new Promise(resolve => setTimeout(resolve, 20))
+
+  const after = await readBack(kernel, created.teamId)
+  assert.equal(after.tasks[0].status, 'claimed')
+  assert.equal(after.tasks[0].attempt, before.tasks[0].attempt + 1, 'on a new generation')
+  assert.notEqual(after.tasks[0].attemptId, before.tasks[0].attemptId)
+
+  // And the log says why. This is the part agent-teams' snapshot cannot hold:
+  // there, a recovered attempt is indistinguishable from one that never ran.
+  const events = await logOf(kernel, created.teamId)
+  assert.equal(
+    events.some(event => event.type === 'task.rolled_back' && event.code === 'SERVER_ERROR'),
+    true,
+  )
+})
+
+test('a dispatch that never landed gives the task back to the plan, not to the pool', async t => {
+  // `nextReadyTask` reads an owner as "this member's work first" and only then
+  // reaches for the unassigned pool. A rollback that dropped the owner would
+  // therefore let any member pick up a task the profile named for somebody else,
+  // and a seeded plan is exactly where that matters.
+  //
+  // The assertion is also the reconcile's: the log and the record have to say
+  // the same thing, or `writeTeam` refuses the write rather than recording a
+  // change that contradicts itself.
+  const { tool, captain, ctx, kernel } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+
+  ctx.subagents.followup = async () => { throw new Error('transport down') }
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const team = await readBack(kernel, created.teamId)
+  assert.equal(team.tasks[0].status, 'pending', 'the work went back')
+  assert.equal(team.tasks[0].assignee, '建模手', 'to the member the plan named, not to the pool')
+  assert.equal(team.tasks[0].attemptId, undefined)
+
+  const events = await logOf(kernel, created.teamId)
+  const rollback = events.find(event => event.type === 'task.rolled_back')
+  assert.equal(rollback.assignee, '建模手', 'and the log states the same holder as the record')
+  assert.match(rollback.reason, /dispatch failed/)
 })
 
 test('the same progress delivered twice is not recorded twice', async t => {

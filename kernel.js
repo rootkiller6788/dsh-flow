@@ -167,30 +167,40 @@ export function installFlowKernel(ctx, config = {}) {
     ),
   })
 
-  // The team registry itself: this deployment's teams and their append-only
-  // log, which is what a team *is* here. It corresponds to the host's own
-  // `ctx.sessions` — the thing that owns the record — and it is deliberately
+  // Three services, named for the host's own convention. The shapes differ, and
+  // the difference is forced rather than chosen: one name can have exactly one
+  // provider here, so a seam whose implementations genuinely coexist has to be a
+  // **registry** while a seam where two live instances would fight has to be
+  // decided at mount. The first is `flowTeamSources`, the second `flowRunner` —
+  // and a deployment that wants to read agent-teams' teams without its executor
+  // mounted gets exactly that: the canvas shows both sets of teams, the tools act
+  // on ours, and nothing runs the other one.
+  //
+  // `flowTeams` is the team registry itself: this deployment's teams and their
+  // append-only log, which is what a team *is* here. It corresponds to the host's
+  // own `ctx.sessions` — the thing that owns the record — and it is deliberately
   // exposed whole rather than as a curated face. A hand-picked subset would be a
-  // second definition of "the team registry" that nothing keeps in step with
-  // the first, and the store's own methods already carry the two disciplines
-  // that matter: sequence numbers belong to the log, and `writeTeam` requires
-  // the team lock its caller is already holding.
+  // second definition of "the team registry" that nothing keeps in step with the
+  // first, and the store's own methods already carry the two disciplines that
+  // matter: sequence numbers belong to the log, and `writeTeam` requires the team
+  // lock its caller is already holding.
   //
   // Read it beside `flowTeamSources` and the difference is the point: `flowTeams`
   // answers "what does this deployment have", while the sources registry answers
-  // "every team any registered source can see" — a superset during a migration,
-  // and the reason one is a core and the other is a registry.
+  // "every team any registered source can see" — a superset during a migration.
   //
-  // Named for the host's own seam convention. A deployment that wants to read
-  // agent-teams' teams without its executor mounted gets: the canvas shows both
-  // sets of teams, the tools act on ours, and nothing runs the other one.
+  // `flowRunner` says which executor this deployment has, not whether it
+  // dispatches: `manual` is a runner whose every action reports `unsupported`, so
+  // "no execution kernel" is a choice of implementation rather than an absent
+  // service.
   //
-  // `provide` is itself an effect — it registers the service inside the
-  // calling fiber and releases it when that fiber is disposed — so this needs
-  // no matching teardown of its own. Optional-called because a test context
-  // has no services to provide to.
+  // `provide` is itself an effect — it registers the service inside the calling
+  // fiber and releases it when that fiber is disposed — so this needs no matching
+  // teardown of its own. Optional-called because a test context has no services
+  // to provide to.
   ctx.provide?.('flowTeams', store.service)
   ctx.provide?.('flowTeamSources', sources)
+  ctx.provide?.('flowRunner', runner)
 
   return { store, profiles, runner, tools, retired, sources, stateDir, runnerName }
 }

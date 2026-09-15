@@ -210,6 +210,22 @@ test('the core and the seam answer different questions', async t => {
   )
 })
 
+test('the executor seam is provided, and which one it is was decided at mount', async t => {
+  // The seam's shape: exactly one executor, chosen when the plugin is composed.
+  // A registry here would make "which one runs" a runtime question, and the
+  // wrong answer to it is two live schedulers claiming the same task.
+  const executing = mount(t)
+  assert.equal(executing.provided.get('flowRunner'), executing.kernel.runner)
+  assert.equal(executing.provided.get('flowRunner').name, 'subagents')
+
+  // The other mount is a different implementation of the same seam, not an
+  // absent service. That is what makes "show me teams, run nothing" a
+  // configuration rather than a second build.
+  const manual = mount(t, { runner: 'manual' })
+  assert.equal(manual.provided.get('flowRunner').name, 'manual')
+  assert.notEqual(manual.provided.get('flowRunner'), executing.provided.get('flowRunner'))
+})
+
 test('a manual mount still serves every tool, and simply never executes', async t => {
   const { tool, captain, calls, kernel } = mount(t, { runner: 'manual' })
   const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)

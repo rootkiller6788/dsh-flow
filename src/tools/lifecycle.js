@@ -79,12 +79,19 @@ export function editPlanTool(deps) {
     },
     properties: { teamId: { type: 'string' }, members: { type: 'number' }, tasks: { type: 'number' } },
     required: ['teamId', 'members', 'tasks'],
-    async execute(args) {
-      return deps.withTeamLock(args.teamId, async () => {
-        const team = await deps.readTeam(args.teamId)
-        if (team === undefined) throw new FlowToolError(`no team "${args.teamId}"`)
+    async execute(args, exec) {
+      // Who the caller is decides *which* team, exactly as it does for every
+      // other tool that shapes one. `args.teamId` is not the authority — a
+      // session that names a team it does not lead is refused rather than
+      // obeyed, and the team is located from the caller instead.
+      const located = await locateTeamByCaptain(exec, deps)
+      const teamId = located.team.id
+      return deps.withTeamLock(teamId, async () => {
+        // Re-read under the lock: the plan may have been edited or approved
+        // since it was located, and the caller may no longer lead it.
+        const team = await requireFresh(teamId, located.caller, 'captain', deps)
         if (team.phase !== 'staged') {
-          throw new FlowToolError(`team "${args.teamId}" is ${team.phase ?? 'running'}; only a staged plan can be edited`)
+          throw new FlowToolError(`team "${teamId}" is ${team.phase ?? 'running'}; only a staged plan can be edited`)
         }
         const planned = deps.planEdits(team, args, deps.now())
         // The expander reports a refused edit as `{ error }` rather than by
@@ -92,9 +99,9 @@ export function editPlanTool(deps) {
         // an answer, not an exception. Saying so is this layer's job.
         if (!Array.isArray(planned)) throw new FlowToolError(planned.error)
         if (planned.length === 0) throw new FlowToolError('nothing to change')
-        await deps.appendEvents(args.teamId, planned)
-        const next = await deps.materialize(args.teamId)
-        return { teamId: args.teamId, members: next.members.length, tasks: next.tasks.length }
+        await deps.appendEvents(teamId, planned)
+        const next = await deps.materialize(teamId)
+        return { teamId, members: next.members.length, tasks: next.tasks.length }
       })
     },
   })
@@ -115,25 +122,30 @@ export function approveTeamTool(deps) {
     parameters: { teamId: { type: 'string', required: true } },
     properties: { teamId: { type: 'string' }, phase: { type: 'string' }, spawned: { type: 'number' } },
     required: ['teamId', 'phase'],
-    async execute(args) {
-      const started = await deps.withTeamLock(args.teamId, async () => {
-        const team = await deps.readTeam(args.teamId)
-        if (team === undefined) throw new FlowToolError(`no team "${args.teamId}"`)
+    async execute(args, exec) {
+      // Approval is the moment a plan becomes work — members spawn and the first
+      // tasks go out — so it is the tool that most needs the caller identified.
+      // The team is located from the caller, not from `args.teamId`: a session
+      // that names a team it does not lead is refused rather than obeyed.
+      const located = await locateTeamByCaptain(exec, deps)
+      const teamId = located.team.id
+      const started = await deps.withTeamLock(teamId, async () => {
+        const team = await requireFresh(teamId, located.caller, 'captain', deps)
         if (team.phase !== 'staged') {
-          throw new FlowToolError(`team "${args.teamId}" is already ${team.phase ?? 'running'}`)
+          throw new FlowToolError(`team "${teamId}" is already ${team.phase ?? 'running'}`)
         }
         const now = deps.now()
-        await deps.appendEvents(args.teamId, [
-          { type: 'team.phase_changed', at: now, seq: await deps.nextSeq(args.teamId), from: 'staged', to: 'running' },
+        await deps.appendEvents(teamId, [
+          { type: 'team.phase_changed', at: now, seq: await deps.nextSeq(teamId), from: 'staged', to: 'running' },
         ])
-        await deps.materialize(args.teamId)
+        await deps.materialize(teamId)
         return true
       })
-      if (!started) return { teamId: args.teamId, phase: 'running', spawned: 0 }
+      if (!started) return { teamId, phase: 'running', spawned: 0 }
 
-      const spawned = await deps.spawnMembers(args.teamId)
-      await deps.kickTeam(args.teamId)
-      return { teamId: args.teamId, phase: 'running', spawned }
+      const spawned = await deps.spawnMembers(teamId)
+      await deps.kickTeam(teamId)
+      return { teamId, phase: 'running', spawned }
     },
   })
 }

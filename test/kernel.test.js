@@ -476,6 +476,16 @@ test('a member is refused the tools that shape the team', async t => {
     /not leading any team/,
   )
 
+  // A member is also refused the tools that shape *somebody else's* team, and
+  // so is a stranger — which is the case the capability layer cannot cover,
+  // because a session in no team has nothing for it to deny.
+  const stranger = { agent: { id: 'nobody' } }
+  await assert.rejects(
+    tool('flow_edit_plan').execute({ teamId: created.teamId, addTasks: [{ subject: 'sneak' }] }, stranger),
+    /not leading any team/,
+  )
+  await assert.rejects(tool('flow_approve').execute({ teamId: created.teamId }, stranger), /not leading any team/)
+
   // And a stranger sees nothing at all.
   await assert.rejects(tool('flow_status').execute({ teamId: created.teamId }, { agent: { id: 'nobody' } }), /do not lead or belong/)
 

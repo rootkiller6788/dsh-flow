@@ -14,7 +14,10 @@ import { createFakeHost } from './support/fake-host.js'
 function buildTools(options = {}) {
   const events = []
   const teams = new Map()
-  if (options.team !== undefined) teams.set(options.team.id, options.team)
+  // The fixture captain is the caller unless a test says otherwise, which is
+  // what makes `locateTeamByCaptain` find the team and `requireFresh` accept the
+  // caller. A test that wants the refusal overrides `captainSessionId`.
+  if (options.team !== undefined) teams.set(options.team.id, { captainSessionId: 'sess-cap', ...options.team })
   const seqs = new Map()
   const spawnCalls = []
   const kicks = []
@@ -34,6 +37,10 @@ function buildTools(options = {}) {
     async withTeamLock(_teamId, operation) { return operation() },
     planEdits: (team, args) => options.planEdits?.(team, args) ?? [],
     captainSessionId: () => 'sess-cap',
+    async findTeamByCaptain(id) {
+      for (const team of teams.values()) if (team.captainSessionId === id) return team.id
+      return undefined
+    },
     async buildTeam({ teamId, name, phase }) {
       return { teamId, name, phase: phase ?? 'staged', members: 2, tasks: 3, events: [
         { type: 'team.created', at: 1, seq: 0, name, captainSessionId: 'sess-cap' },
@@ -126,9 +133,28 @@ test('a staged plan edit is recorded', async () => {
   assert.deepEqual(built.events.map(event => event.type), ['task.created'])
 })
 
-test('editing a team that does not exist is refused', async () => {
+test('editing a team the caller does not lead is refused', async () => {
+  // The team is located from the caller and never from the argument: a session
+  // that names a team it does not lead is refused rather than obeyed, so the
+  // `teamId` a call carries is not an authority. That also covers the team that
+  // does not exist at all — the caller's own state is what gets checked.
   const built = buildTools()
-  await assert.rejects(() => tool(built, 'flow_edit_plan').execute({ teamId: 'ghost' }, exec), /no team "ghost"/)
+  await assert.rejects(
+    () => tool(built, 'flow_edit_plan').execute({ teamId: 'ghost' }, exec),
+    /not leading any team/,
+  )
+  assert.deepEqual(built.events, [], 'and nothing was recorded')
+})
+
+test('somebody else\'s plan cannot be edited', async () => {
+  // The hole this closes: without the caller check, any session able to call
+  // tools could rewrite any staged team's plan by naming its id.
+  const built = buildTools({ team: { id: 'T', phase: 'staged', members: [], tasks: [], captainSessionId: 'someone-else' } })
+  await assert.rejects(
+    () => tool(built, 'flow_edit_plan').execute({ teamId: 'T' }, exec),
+    /not leading any team/,
+  )
+  assert.deepEqual(built.events, [])
 })
 
 test('approving moves the phase and spawns the members', async () => {
@@ -149,7 +175,24 @@ test('approving a running team is refused, so nobody is spawned twice', async ()
   assert.deepEqual(built.spawnCalls, [])
 })
 
-test('approving a team that does not exist is refused', async () => {
+test('approving a team the caller does not lead is refused', async () => {
   const built = buildTools()
-  await assert.rejects(() => tool(built, 'flow_approve').execute({ teamId: 'ghost' }, exec), /no team "ghost"/)
+  await assert.rejects(
+    () => tool(built, 'flow_approve').execute({ teamId: 'ghost' }, exec),
+    /not leading any team/,
+  )
+  assert.deepEqual(built.spawnCalls, [], 'and nothing was started')
+})
+
+test('somebody else\'s plan cannot be approved', async () => {
+  // The most consequential of the two: approval is the moment a plan becomes
+  // work — members spawn and the first tasks go out. Naming a team id must not
+  // be enough to start it.
+  const built = buildTools({ team: { id: 'T', phase: 'staged', members: [], tasks: [], captainSessionId: 'someone-else' } })
+  await assert.rejects(
+    () => tool(built, 'flow_approve').execute({ teamId: 'T' }, exec),
+    /not leading any team/,
+  )
+  assert.deepEqual(built.spawnCalls, [])
+  assert.deepEqual(built.events, [])
 })

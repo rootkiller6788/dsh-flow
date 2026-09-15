@@ -6,7 +6,7 @@
 // about, so "dispose resolved" has to mean "nothing of mine is still running".
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createSubagentsRunner } from '../src/runner/index.js'
+import { createSubagentsRunner } from '../src/runner/subagents.js'
 import { UnsupportedHarnessError } from '../src/runner/harness-compat.js'
 import { createFakeStore } from './support/fake-store.js'
 

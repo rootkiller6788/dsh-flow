@@ -1,5 +1,10 @@
 // The subagents runner: the seam's real implementation, assembled.
 //
+// One of the two implementations the composition root chooses between at mount
+// — `manual.js` is the other, and `interface.js` is what they both satisfy. The
+// pair is decided there rather than here because two live dispatchers would
+// claim the same task, which is a mistake no runtime check should have to catch.
+//
 // It binds the pure decisions to the live host and owns the one thing a
 // dispatcher cannot get wrong — reaching quiescence on the way out. The host
 // awaits whatever a disposer returns, but it cannot force a disposer to wait

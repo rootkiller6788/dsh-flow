@@ -22,7 +22,7 @@
 // there is no runtime decision left to get wrong.
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { createSubagentsRunner } from './src/runner/index.js'
+import { createSubagentsRunner } from './src/runner/subagents.js'
 import { createManualRunner } from './src/runner/manual.js'
 import { installTeamCapabilities } from './src/runner/capabilities.js'
 import { deliverToMember, interruptMember, parseMemberLabel, spawnMember, steerCaptainReport, waitForMemberIdle } from './src/runner/member-ops.js'

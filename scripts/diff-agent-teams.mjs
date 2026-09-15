@@ -2,10 +2,17 @@
 // against the TypeScript original in a sibling checkout of dsh-agent-teams.
 //
 // The original is imported directly — Node 24 strips types natively — and it is
-// the reference that matters, because our on-disk format is deliberately
-// wire-compatible with its files. The sibling checkout is a development
-// dependency, not a build one, so a clone without it self-skips (the shape DSH
-// uses for its own key-gated e2e tests).
+// the reference for the *rules*, because those are an interoperability contract:
+// the status table, the gates and the scope classifier decide what a member and
+// a task mean, and two plugins that disagree about that cannot share a workspace.
+//
+// Our on-disk format is *not* wire-compatible: teams are an append-only event
+// log where agent-teams keeps a mutable snapshot. Reading its records is the
+// read-only source's job (`src/store/source-agent-teams.js`), which is also
+// where the two models are reconciled.
+//
+// The sibling checkout is a development dependency, not a build one, so a clone
+// without it self-skips (the shape DSH uses for its own key-gated e2e tests).
 //
 // The gate corpus is a systematic cross-product rather than a sample, so a full
 // run takes about a minute. This is an explicit command, not part of `pnpm test`.

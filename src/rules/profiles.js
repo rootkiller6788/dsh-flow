@@ -143,7 +143,7 @@ export function parseProfileInvocation(rawInput) {
     if (token === undefined) break
     const parsed = parseLeadingProfileFlag(token, tokens[index + 1])
     if (parsed === undefined) break
-    if (profile !== undefined) throw new Error('duplicate AgentTeams profile flag')
+    if (profile !== undefined) throw new Error('duplicate dsh-flow profile flag')
     profile = parsed.name
     index += parsed.consumed
   }
@@ -154,4 +154,27 @@ export function parseProfileInvocation(rawInput) {
 /** Task planning mode: an explicit `captain` request, else `seed`. */
 export function resolveProfileTaskPlanning(config) {
   return config?.taskPlanning === 'captain' ? 'captain' : 'seed'
+}
+
+/**
+ * The slash-command name a profile is reachable under.
+ *
+ * A profile key is free text a deployment chose; a command name is a closed
+ * namespace. Only lowercase ASCII letters, digits and single interior dashes are
+ * representable, and anything else yields `undefined` rather than a
+ * normalisation — because a normalisation would have to decide what `foo bar`
+ * and `foo_bar` become, and the answer that maps both onto one command silently
+ * makes one profile unreachable.
+ *
+ * The prefix is the caller's: this decides the *suffix*, and the namespace it
+ * lands in belongs to whoever is registering commands.
+ *
+ * @param profileName - the configured profile key.
+ * @param prefix - what the command namespace prepends, if anything.
+ * @returns the command name, or `undefined` when the profile is not representable.
+ */
+export function profileCommandName(profileName, prefix = '') {
+  const normalized = String(profileName).trim().toLowerCase()
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized)) return undefined
+  return `${prefix}${normalized}`
 }

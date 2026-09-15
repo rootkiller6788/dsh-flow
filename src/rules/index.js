@@ -42,7 +42,7 @@ export { openHighFindings, acceptanceCovered, verifyCovered, evaluateQualityComp
 export { canDeclareDelivery, resumeTeamState, describeQualityLoop } from './delivery.js'
 export { buildCoverageMatrix } from './coverage.js'
 export { looksLikeGateTestContract, sanitizeReviewObjective, sanitizeReviewAcceptance, unresolvedFindings, findingKey, schedulableAssignee, countRepairAttempts, hasOpenFollowUp, planQualityFollowUp } from './followup.js'
-export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, parseProfileInvocation, resolveProfileTaskPlanning } from './profiles.js'
+export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, parseProfileInvocation, profileCommandName, resolveProfileTaskPlanning } from './profiles.js'
 export { MAX_PROFILE_MEMBERS, buildTeamEvents, planTeamEdits } from './plan.js'
 export { TEAM_EVENT_TYPES, requiredEventFields, optionalEventFields, isTeamEvent, teamEvent, parseEventLog, serializeEventLog } from './events.js'
 export { reduceTeamEvent, projectTeam, replayTeam, taskAttempts, taskRollbacks } from './project.js'

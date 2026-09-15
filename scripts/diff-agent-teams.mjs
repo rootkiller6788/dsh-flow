@@ -869,7 +869,10 @@ for (const [label, a, b] of [
   let mismatches = 0
   for (const raw of invocations) {
     let expected, actual
-    try { expected = profiles.parseProfileInvocation(raw) } catch (error) { expected = `THREW:${error.message}` }
+    // A thrown message is a user-visible string, and this plugin is not called
+    // AgentTeams. Normalised rather than exempted, so the rest of the message is
+    // still compared — the product name is the only thing allowed to differ.
+    try { expected = profiles.parseProfileInvocation(raw) } catch (error) { expected = `THREW:${error.message.replaceAll('AgentTeams', 'dsh-flow')}` }
     try { actual = ours.parseProfileInvocation(raw) } catch (error) { actual = `THREW:${error.message}` }
     if (show(expected) !== show(actual)) { mismatches++; differ(`parseProfileInvocation(${JSON.stringify(raw)})`, `${show(expected)} vs ${show(actual)}`) }
   }

@@ -32,7 +32,7 @@ import { createFlowStore } from './src/store/index.js'
 import { createPlanHooks } from './src/config/hooks.js'
 import { createProfileRegistry, describeProfiles } from './src/config/profile-registry.js'
 import { createSourceRegistry } from './src/sources/sources.js'
-import { installFlowTools } from './src/tools/index.js'
+import { installFlowTools, registerFlowCommand } from './src/tools/index.js'
 import { RETIRED_MEMBERS_FILE, mergeRetiredMemberIds, parseRetiredMemberIds, serializeRetiredMemberIds } from './src/rules/index.js'
 
 /** The runner names a deployment may mount. */
@@ -130,6 +130,16 @@ export function installFlowKernel(ctx, config = {}) {
     steerCaptain: (captain, from, content) => steerCaptainReport(captain, from, content),
     wakeMember: entry => deliverToMember(ctx, entry).then(() => true, () => false),
     activity: sessionId => ctx.agents?.get?.(sessionId)?.status ?? 'ready',
+  })
+
+  // The slash command, registered whichever runner is mounted: staging a plan is
+  // a store operation, so it works in a deployment that runs nothing. The
+  // registry is turned into a plain map here rather than inside the command
+  // module, which keeps that module's contract to data — and the registry is
+  // fixed at mount, so the copy cannot go stale.
+  registerFlowCommand(ctx, {
+    profiles: Object.fromEntries(profiles.list().map(profile => [profile.name, profile])),
+    onWarn,
   })
 
   // The prompt a session starts from, and the tools a member must not reach,

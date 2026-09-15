@@ -53,3 +53,7 @@ export {
   createTaskTool, reassignTaskTool, claimTaskTool, updateTaskTool,
   sendMessageTool, statusTool,
 }
+export {
+  FLOW_COMMAND, FLOW_PROFILE_COMMAND_PREFIX, probeUserMessageFactory, profileForCommand,
+  parseFlowCommandText, invokedFlowCommand, flowActivationDirective, registerFlowCommand,
+} from './command.js'

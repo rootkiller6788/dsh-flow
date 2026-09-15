@@ -130,3 +130,37 @@ test('the snapshot is a copy, so a view cannot mutate the store through it', asy
   team.members.length = 0
   assert.equal((await opened.service.readTeam('T')).tasks[0].subject, 'first')
 })
+
+test('every field the canvas views read is in the snapshot', async t => {
+  // The views were written against a foreign feed. This is the list of fields
+  // they actually read, checked here rather than discovered in a browser: a
+  // snapshot missing one renders a blank where a value belongs, and nothing
+  // server-side would notice.
+  const team = await teamOf(await open(t))
+  for (const field of ['teamId', 'name', 'phase', 'halted', 'captainName', 'members', 'tasks', 'captainInbox']) {
+    assert.equal(field in team, true, `the team snapshot is missing ${field}`)
+  }
+  for (const field of ['name', 'role', 'model', 'status', 'activity', 'done', 'total', 'unread', 'currentTask']) {
+    assert.equal(field in team.members[0], true, `a member snapshot is missing ${field}`)
+  }
+  for (const field of ['id', 'subject', 'state', 'assignee', 'dependencies', 'depth', 'kind', 'attempt', 'attemptId']) {
+    assert.equal(field in team.tasks[0], true, `a task snapshot is missing ${field}`)
+  }
+  // `verdict` is present only when the task has one, which is the contract the
+  // view relies on: it renders the chip on truthiness, so an empty string and
+  // an absent key have to mean the same thing.
+  assert.equal('verdict' in team.tasks[0], false, 'a task with no verdict carries no verdict')
+})
+
+test('a member holding work says so, so the lane shows the task it owns', async t => {
+  const opened = await open(t, [teamEvent('task.attempt_started', { id: 't3', attemptId: 'att-3', assignee: 'b' }, 1010, 10)])
+  const team = await teamOf(opened)
+  assert.equal(team.members.find(member => member.name === 'b').currentTask, 't3')
+  assert.equal(team.members.find(member => member.name === 'a').currentTask, '')
+})
+
+test('work the team could hand out is listed, so the queue is visible', async t => {
+  // t1 failed, so t2 is blocked behind it and only t3 is actually claimable.
+  const team = await teamOf(await open(t))
+  assert.deepEqual(team.ready, ['t3'])
+})

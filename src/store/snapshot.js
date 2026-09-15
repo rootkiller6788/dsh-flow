@@ -22,7 +22,7 @@ import {
 } from '../rules/index.js'
 
 /** Member statuses the record can hold, mapped to what a reader should see. */
-function memberView(member, team) {
+function memberView(member, team, options) {
   const owned = ownedOpenTask(team.tasks, member.name)
   const done = team.tasks.filter(task => task.assignee === member.name && task.status === 'completed').length
   const total = team.tasks.filter(task => task.assignee === member.name).length
@@ -34,9 +34,12 @@ function memberView(member, team) {
     model: member.model ?? '',
     reasoning_effort: member.reasoningEffort ?? '',
     // The recorded status is kept as-is; `activity` is what the runtime knows
-    // right now, and the view prefers it. Keeping both means a canvas with no
-    // runtime still renders, and one with a runtime renders live.
+    // right now. Keeping both means a canvas with no runtime still renders, and
+    // one with a runtime renders live — and `activity` is the only field here
+    // that a running executor could contradict, which is why it is the one
+    // named differently.
     status: member.status,
+    activity: options.activity?.(member.id) ?? (member.status === 'working' ? 'working' : 'idle'),
     done,
     total,
     currentTask: owned === undefined ? '' : owned.id,
@@ -70,7 +73,7 @@ export function teamSnapshot(team, options = {}) {
     profileName: team.profile?.name ?? '',
     members: team.members
       .filter(member => member.status !== 'removed')
-      .map(member => ({ ...memberView(member, team), unread: unread(member.name) })),
+      .map(member => ({ ...memberView(member, team, options), unread: unread(member.name) })),
     tasks: team.tasks.map(task => ({
       id: task.id,
       subject: task.subject,

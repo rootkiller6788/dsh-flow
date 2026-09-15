@@ -35,6 +35,30 @@ export function keyDigest(name) {
  * @param name - any user-supplied name.
  * @returns a non-empty key safe as a single path segment.
  */
+/**
+ * Whether a string can name a team directory.
+ *
+ * Teams are filed under `<root>/<teamId>`, so an id is exactly one path segment
+ * and nothing else. Checked at the boundary rather than trusted from it:
+ * `enumerate` only ever returns names the filesystem gave back, but `load` takes
+ * whatever a caller passes, and `join(root, '../elsewhere')` reads a directory
+ * this deployment does not own.
+ *
+ * The rule is deliberately the strict form — one segment, no separators, not a
+ * dot-leading name — because an id that needs normalising to be safe is an id
+ * that was constructed somewhere it should not have been.
+ *
+ * @param value - any candidate.
+ * @returns whether it can name a team directory.
+ */
+export function isTeamId(value) {
+  return typeof value === 'string'
+    && value !== ''
+    && !value.startsWith('.')
+    && !value.includes('/')
+    && !value.includes('\\')
+}
+
 export function sanitizeKey(name) {
   const cleaned = String(name).normalize('NFC').trim().toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '-')

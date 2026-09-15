@@ -27,7 +27,7 @@ export {
   TASK_TRANSITIONS, transitionError,
 } from './constants.js'
 export { sha256Hex } from './sha256.js'
-export { MAX_KEY_LENGTH, keyDigest, sanitizeKey } from './identifiers.js'
+export { MAX_KEY_LENGTH, isTeamId, keyDigest, sanitizeKey } from './identifiers.js'
 export {
   isReviewPolicy, isReviewFinding, isAcceptanceResult, isCommandResult,
   normalizeBlankOptionalTaskFields, hasValidQualityTaskFields,

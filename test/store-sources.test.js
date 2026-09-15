@@ -121,12 +121,69 @@ async function twoSources(t, agentTeams = true) {
   return { registry, service, native, theirs }
 }
 
-test('both sources are registered, and the native one is the writable one', async t => {
+test('both sources are registered, and only one of them can be appended to', async t => {
   const { registry } = await twoSources(t)
   assert.deepEqual(registry.describe().map(source => source.id), ['native', 'agent-teams'])
-  assert.equal(registry.get('native').writable, true)
-  assert.equal(registry.get('agent-teams').writable, false)
+  assert.equal(registry.get('native').canAppend('modeling'), true)
+  assert.equal(registry.get('agent-teams').canAppend('modeling'), false)
+  // The query is what a caller branches on; the missing method is what makes
+  // bypassing that branch an error rather than a silent write into somebody
+  // else's record.
   assert.equal(typeof registry.get('agent-teams').append, 'undefined', 'read-only by construction, not by a flag')
+})
+
+test('each source says where its records come from', async t => {
+  // A canvas drawing two sets of teams has to be able to say which is which;
+  // during a migration that is the only thing distinguishing them.
+  const { registry } = await twoSources(t)
+  for (const source of registry.describe()) {
+    assert.equal(typeof source.origin, 'string', `${source.id} does not say where it reads from`)
+    assert.notEqual(source.origin, '')
+    assert.equal(typeof source.writable, 'boolean')
+  }
+  assert.notEqual(registry.describe()[0].origin, registry.describe()[1].origin)
+})
+
+test('a source that cannot enumerate is not asked to', async t => {
+  // "Not asked" and "asked and answered nothing" are different states, and only
+  // the first is honest about a source with no notion of a team list.
+  const { registry } = await twoSources(t)
+  let asked = 0
+  registry.register({
+    id: 'listing-only',
+    canEnumerate: () => false,
+    enumerate: async () => { asked += 1; return [{ teamId: 'nope' }] },
+  })
+  assert.deepEqual((await registry.enumerate()).map(entry => entry.teamId).sort(), ['modeling', 'native-team'])
+  assert.equal(asked, 0)
+})
+
+test('an id that is not a single path segment names no team', async t => {
+  // Every source is asked whether it can serve an id rather than trusted to have
+  // been handed a good one: an id *is* a path segment, so
+  // `join(root, '../elsewhere')` reads a directory this deployment does not own.
+  const { registry, theirs } = await twoSources(t)
+  // A real record is planted one level up, so "refused" is distinguishable from
+  // "absent" — joining the id onto the root would have found it.
+  const outside = join(theirs, '..', 'modeling')
+  mkdirSync(outside, { recursive: true })
+  writeFileSync(join(outside, 'team.json'), JSON.stringify(agentTeamsState()))
+
+  for (const id of ['../modeling', 'a/b', 'a\\b', '..', '.', '']) {
+    assert.equal(registry.get('agent-teams').canLoad(id), false, JSON.stringify(id))
+    assert.equal(registry.get('native').canLoad(id), false, JSON.stringify(id))
+  }
+  assert.equal(registry.get('agent-teams').canLoad('modeling'), true)
+  // The question is whether the *id* can name a team, not whether one is there:
+  // `archive` is a well-formed segment, and whether it holds anything is what
+  // `load` answers. Conflating the two would make the capability query a read.
+  assert.equal(registry.get('agent-teams').canLoad('archive'), true)
+  assert.equal(await registry.get('agent-teams').load('archive'), undefined)
+  assert.equal(
+    await registry.get('agent-teams').load('../modeling'),
+    undefined,
+    "the record one level up is not this source's to read",
+  )
 })
 
 test('every team from every source is enumerated, tagged with where it came from', async t => {

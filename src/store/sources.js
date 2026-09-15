@@ -12,6 +12,7 @@
 // The executor seam is the opposite, deliberately. Two live schedulers would
 // both claim the same task, so there is no runtime decision to make and the
 // mount decides instead.
+import { isTeamId } from '../rules/index.js'
 import { SOURCE_ID as NATIVE_ID } from './source-native.js'
 import { SOURCE_ID as AGENT_TEAMS_ID, createAgentTeamsSource } from './source-agent-teams.js'
 
@@ -40,7 +41,11 @@ export function createSourceRegistry(options) {
      * id is a configuration error, and letting the later one win silently would
      * mean the teams a deployment sees depend on mount order.
      *
-     * @param source - `{ id, writable, describe, enumerate, load, readTeam }`.
+     * @param source - `{ id, describe, canEnumerate, enumerate, canLoad, load,
+     *   canAppend, append?, readMailbox }`. The capabilities are asked rather
+     *   than inferred: a caller branches on `canAppend`, so `append` being
+     *   *absent* is what makes bypassing that branch an error rather than a
+     *   silent write into somebody else's record.
      * @returns a disposer that removes it.
      */
     register(source) {
@@ -76,6 +81,10 @@ export function createSourceRegistry(options) {
     async enumerate() {
       const found = []
       for (const source of sources.values()) {
+        // A source that cannot enumerate is not asked. "Not asked" and "asked
+        // and answered nothing" are different states, and only the first is
+        // honest about a source with no notion of a team list at all.
+        if (source.canEnumerate?.() !== true) continue
         for (const entry of await source.enumerate()) found.push({ ...entry, source: source.id })
       }
       return found
@@ -103,19 +112,25 @@ export function createSourceRegistry(options) {
 function createNativeSource(service) {
   return {
     id: NATIVE_ID,
-    writable: true,
     describe() {
-      return { id: NATIVE_ID, writable: true, note: 'the append-only team log' }
+      return {
+        id: NATIVE_ID,
+        writable: true,
+        origin: "this deployment's own team log",
+        note: 'the log is the record; state.json is a reading of it that can be rebuilt',
+      }
     },
+    canEnumerate: () => true,
+    canLoad: teamId => isTeamId(teamId),
+    canAppend: () => true,
     async enumerate() {
       return (await service.listTeamIds()).map(teamId => ({ teamId }))
     },
     load: teamId => service.readTeamEvents(teamId),
-    readTeam: teamId => service.readTeam(teamId),
     readMailbox: (teamId, memberName, onMalformedLine) => (
       service.readMailbox(teamId, memberName, onMalformedLine)
     ),
-    /** The one operation only a writable source has. */
+    /** The one operation only a source that can append has at all. */
     append: (teamId, events) => service.appendEvents(teamId, events),
   }
 }

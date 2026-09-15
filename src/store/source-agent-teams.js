@@ -20,7 +20,7 @@
 // refer to it by.
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { isTeamState, parseMailboxLines, sanitizeKey } from '../rules/index.js'
+import { isTeamState, isTeamId, parseMailboxLines, sanitizeKey } from '../rules/index.js'
 
 /** One source's name in the registry. */
 export const SOURCE_ID = 'agent-teams'
@@ -137,28 +137,37 @@ export function createAgentTeamsSource(options) {
 
   return {
     id: SOURCE_ID,
-    // Read-only by construction: there is no `append` here to call. A source
-    // that could write would make agent-teams' record a second writer of the
-    // same team, and the two would disagree after the first concurrent update.
-    writable: false,
+    // Read-only by construction: there is no `append` here to call, so no
+    // caller can be handed one. A source that could write would make
+    // agent-teams' record a second writer of the same team, and the two would
+    // disagree after the first concurrent update.
 
     describe() {
       return {
         id: SOURCE_ID,
         writable: false,
+        origin: 'an imported .agent-teams directory',
         // What a reader needs to know before choosing this source: the records
         // are somebody else's format, and the history in them is whatever that
         // format kept, which is a snapshot rather than a log.
-        note: 'reads .agent-teams/ team records; state only, no attempt history',
+        note: 'state only, no attempt history',
       }
     },
+
+    canEnumerate: () => true,
+    // The id is checked rather than trusted. `enumerate` only returns names the
+    // filesystem gave back, but `load` takes whatever a caller passes, and an id
+    // is a path segment: `join(root, '../elsewhere')` reads a directory this
+    // deployment does not own.
+    canLoad: teamId => isTeamId(teamId),
+    canAppend: () => false,
 
     async enumerate() {
       try {
         const entries = await readdir(root, { withFileTypes: true })
         return entries
           .filter(entry => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'archive')
-          .map(entry => ({ teamId: entry.name, source: SOURCE_ID }))
+          .map(entry => ({ teamId: entry.name }))
       } catch (error) {
         if (error?.code === 'ENOENT') return []
         throw error
@@ -166,15 +175,13 @@ export function createAgentTeamsSource(options) {
     },
 
     async load(teamId) {
+      if (!isTeamId(teamId)) return undefined
       const state = await snapshotOf(teamId)
       return state === undefined ? undefined : eventsFromTeamState(state, Date.now())
     },
 
-    async readTeam(teamId) {
-      return snapshotOf(teamId)
-    },
-
     async readMailbox(teamId, memberName, onMalformedLine) {
+      if (!isTeamId(teamId)) return []
       const key = sanitizeKey(memberName)
       try {
         const raw = await readFile(join(teamDir(teamId), 'inbox', `${key}.jsonl`), 'utf8')

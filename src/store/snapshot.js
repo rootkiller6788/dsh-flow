@@ -110,9 +110,11 @@ export function teamSnapshot(team, options = {}) {
  * mail for everybody would be wrong in a way nobody would notice — a member
  * with a message waiting would look like a member with nothing to say.
  *
- * A team from a read-only source is projected from its own record rather than
- * from a log it has not got: its events are synthesized so the same projection
- * applies, which is what lets one canvas draw both without a branch per view.
+ * Every source is read the same way — ask whether it can serve this team, then
+ * project its log. A read-only source's log is synthesized from its own record,
+ * which is what lets one canvas draw both kinds without a branch per view: the
+ * projection is the only thing that knows what a team looks like, and it does
+ * not care where the events came from.
  *
  * @param registry - the source registry.
  * @param options.onMalformedLine - forwarded to the mailbox readers, so a
@@ -123,10 +125,11 @@ export async function canvasSnapshot(registry, options = {}) {
   const teams = []
   for (const { teamId, source } of await registry.enumerate()) {
     const entry = registry.get(source)
-    if (entry === undefined) continue
-    const team = entry.writable === true
-      ? await entry.readTeam(teamId)
-      : projectTeam(await entry.load(teamId))?.state
+    if (entry === undefined || entry.canLoad?.(teamId) !== true) continue
+    const events = await entry.load(teamId)
+    // A source that has no such team answers with nothing rather than with an
+    // empty log: `projectTeam` folds a log, and an absent team is not one.
+    const team = events === undefined ? undefined : projectTeam(events)?.state
     if (team === undefined || !isTeamState({ ...team, id: teamId }, teamId)) continue
 
     const counts = new Map()
@@ -143,7 +146,7 @@ export async function canvasSnapshot(registry, options = {}) {
     teams.push({
       ...teamSnapshot({ ...team, id: teamId }, { unread: name => counts.get(name) ?? 0, captainInbox }),
       source,
-      writable: entry.writable === true,
+      writable: entry.canAppend?.(teamId) === true,
     })
   }
   return { teams }

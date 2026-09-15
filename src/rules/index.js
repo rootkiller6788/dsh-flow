@@ -40,7 +40,7 @@ export { PATH_CLASSIFICATIONS, normalizeWorkspacePath, pathMatchesScope, isDefau
 export { taskKindOf, isQualityKind, resolveReviewPolicy, dependencyClosureContains, validateCreateTask } from './gates.js'
 export { openHighFindings, acceptanceCovered, verifyCovered, evaluateQualityCompletion } from './completion.js'
 export { canDeclareDelivery, resumeTeamState, describeQualityLoop } from './delivery.js'
-export { buildCoverageMatrix } from './coverage.js'
+export { buildCoverageMatrix, goalItemsOf } from './coverage.js'
 export { looksLikeGateTestContract, sanitizeReviewObjective, sanitizeReviewAcceptance, unresolvedFindings, findingKey, schedulableAssignee, countRepairAttempts, hasOpenFollowUp, planQualityFollowUp } from './followup.js'
 export { isCaptainName, formatCycleError, topoSortTasks, stripOneQuotePair, parseProfileInvocation, profileCommandName, resolveProfileTaskPlanning } from './profiles.js'
 export { MAX_PROFILE_MEMBERS, buildTeamEvents, planTeamEdits } from './plan.js'

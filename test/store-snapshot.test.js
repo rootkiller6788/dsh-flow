@@ -137,7 +137,7 @@ test('every field the canvas views read is in the snapshot', async t => {
   // snapshot missing one renders a blank where a value belongs, and nothing
   // server-side would notice.
   const team = await teamOf(await open(t))
-  for (const field of ['teamId', 'name', 'phase', 'halted', 'captainName', 'members', 'tasks', 'captainInbox']) {
+  for (const field of ['teamId', 'name', 'phase', 'halted', 'captainName', 'members', 'tasks', 'captainInbox', 'loop', 'delivery', 'coverage']) {
     assert.equal(field in team, true, `the team snapshot is missing ${field}`)
   }
   for (const field of ['name', 'role', 'model', 'status', 'activity', 'done', 'total', 'unread', 'currentTask']) {
@@ -208,6 +208,51 @@ test('with no runtime the recorded status is the answer, and is not invented', a
   const opened = await open(t, [teamEvent('member.updated', { id: 'a', patch: { status: 'working' } }, 1010, 10)])
   const team = await teamOf(opened)
   assert.equal(team.members.find(member => member.name === 'a').activity, 'working')
+})
+
+// --- the three quality answers ---------------------------------------------
+
+test('the quality answers travel with the team, not only to the model', async t => {
+  // The captain is already told these three by `flow_status`. A canvas that
+  // could not show the same thing would be showing a different team — and the
+  // two would be derived twice, which is two answers waiting to disagree.
+  const team = await teamOf(await open(t))
+  assert.equal(team.delivery.ok, true, 'no quality task is unfinished, so nothing blocks delivery')
+  assert.deepEqual(team.delivery.blockers, [])
+  assert.deepEqual(team.coverage, [], 'no task claims a goal item, so there is nothing to cover')
+  assert.equal(team.loop.halted, false)
+  assert.notEqual(team.loop.summary, '', 'the loop always says something')
+})
+
+test('an unfinished quality task is a blocker that names the task', async t => {
+  // "not finished" is not a blocker anyone can act on; the id and the condition
+  // are, which is what `canDeclareDelivery` exists to produce.
+  const opened = await open(t, [
+    teamEvent('task.created', { task: { id: 't4', subject: 'verify it', kind: 'verification' } }, 1010, 10),
+  ])
+  const team = await teamOf(opened)
+  assert.equal(team.delivery.ok, false)
+  assert.deepEqual(team.delivery.blockers, ['t4 (verification) is not completed'])
+})
+
+test('a goal item is only ever asked of the tasks that claim it', async t => {
+  const opened = await open(t, [
+    teamEvent('task.created', { task: { id: 't4', subject: 'cover X', coverageOf: ['X'] } }, 1010, 10),
+    teamEvent('task.created', { task: { id: 't5', subject: 'cover Y', coverageOf: ['Y'] } }, 1011, 11),
+    teamEvent('task.transitioned', { id: 't5', from: 'pending', to: 'cancelled' }, 1012, 12),
+  ])
+  const byItem = Object.fromEntries((await teamOf(opened)).coverage.map(row => [row.goal_item, row]))
+  assert.deepEqual(byItem.X, { goal_item: 'X', task_ids: ['t4'], status: 'in_progress' })
+  // A cancelled covering task is not coverage: partial coverage of a
+  // requirement is not coverage.
+  assert.deepEqual(byItem.Y, { goal_item: 'Y', task_ids: ['t5'], status: 'blocked' })
+})
+
+test('a halted team says so, and that outranks everything else', async t => {
+  const opened = await open(t, [teamEvent('team.halted', { reason: 'stop' }, 1010, 10)])
+  const team = await teamOf(opened)
+  assert.equal(team.loop.halted, true)
+  assert.equal(team.loop.state, 'halted')
 })
 
 test('work the team could hand out is listed, so the queue is visible', async t => {

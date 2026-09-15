@@ -39,6 +39,7 @@ async function pollTeams() {
   // canvas draws belongs here in the same change.
   const signature = JSON.stringify(snapshots.map(team => [
     team.teamId, team.name, team.phase, team.halted, team.archived,
+    team.loop?.state, team.loop?.summary, team.delivery?.ok, team.delivery?.blockers, team.coverage,
     (team.members ?? []).map(member => [
       member.name, member.status, member.activity, member.done, member.total, member.unread, member.currentTask,
     ]),
@@ -50,8 +51,9 @@ async function pollTeams() {
   if (canReplaceView()) render()
 }
 
-const TASK_STATE_LABEL = { open: '待办', running: '进行中', completed: '完成', failed: '失败', blocked: '阻塞', cancelled: '取消' }
-function taskStateLabel(value) { return TASK_STATE_LABEL[value] ?? String(value ?? '') }
+// `taskStateLabel` lives in `team-panels.js` — that module holds the labels and
+// the quality sections together, and it imports nothing that touches `document`,
+// which is what keeps them testable.
 
 /**
  * The unified composition: the owning conversation's turns are WOVEN into the
@@ -273,4 +275,4 @@ function buildFallbackCluster(team, origin) {
   return { nodes, edges, height: cursorY - origin.y + taskNodes.reduce((max, node) => Math.max(max, node.rect.y + node.rect.h - origin.y), TEAM_H) }
 }
 
-export { pollTeams, buildTeamHierarchy, buildFallbackCluster, taskStateLabel }
+export { pollTeams, buildTeamHierarchy, buildFallbackCluster }

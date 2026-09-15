@@ -299,6 +299,16 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .process-item pre { margin: 0; border-radius: var(--r-sm); background: var(--panel-2); padding: 8px 10px; overflow: auto; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .process-item pre.process-error { background: var(--err-soft); color: var(--err); }
 
+/* Quality sections: the loop verdict, the delivery blockers, goal coverage */
+.quality-line { display: flex; align-items: center; gap: 8px; }
+.quality-title { color: var(--muted); font-size: 12px; font-weight: 650; }
+.quality-count { margin-left: auto; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.quality-summary { margin-top: 6px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+.quality-blocker { margin-top: 6px; border-left: 2px solid var(--err); border-radius: 0 var(--r-sm) var(--r-sm) 0; background: var(--err-soft); padding: 6px 9px; color: var(--text); font-size: 11.5px; font-family: var(--mono); overflow-wrap: anywhere; }
+.coverage-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 6px 10px; }
+.coverage-item { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.coverage-tasks { flex: none; color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
+
 /* ── Team inspector: portrait member rows + task dependency list ──────── */
 .team-member-list { display: flex; flex-direction: column; gap: 10px; }
 .team-member-row { position: relative; display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel-2); padding: 10px 12px; }

@@ -18,7 +18,8 @@
 //   What can be derived from durable facts — the tasks it owns — cannot go
 //   stale that way.
 import {
-  isTeamState, ownedOpenTask, projectTeam, taskDepthsById, taskVisualState, unsatisfiedDependencies,
+  buildCoverageMatrix, canDeclareDelivery, describeQualityLoop, goalItemsOf, isTeamState,
+  ownedOpenTask, projectTeam, taskDepthsById, taskVisualState, unsatisfiedDependencies,
 } from '../rules/index.js'
 
 /** Member statuses the record can hold, mapped to what a reader should see. */
@@ -110,6 +111,14 @@ export function teamSnapshot(team, options = {}) {
         && task.reassigning !== true
         && unsatisfiedDependencies(team.tasks, task.dependencies).length === 0)
       .map(task => task.id),
+    // The three quality answers the tools already give the model, so the canvas
+    // can show the same thing the captain is being told. Each is asked of the
+    // team record rather than recomputed here: a second implementation of "can
+    // this be delivered" is a second answer, and the two would eventually
+    // disagree in front of a human instead of in a test.
+    loop: describeQualityLoop(team),
+    delivery: canDeclareDelivery(team),
+    coverage: buildCoverageMatrix(goalItemsOf(team.tasks), team.tasks),
     captainInbox: options.captainInbox ?? [],
   }
 }

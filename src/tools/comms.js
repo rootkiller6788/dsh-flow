@@ -12,7 +12,7 @@
 // message — and the result says which of the two happened.
 import {
   CAPTAIN_KEY, buildCoverageMatrix, canDeclareDelivery, describeQualityLoop,
-  openHighFindings, taskKindOf,
+  goalItemsOf, openHighFindings, taskKindOf,
 } from '../rules/index.js'
 import { FlowToolError, defineFlowTool } from './define.js'
 import { locateTeamByParticipant, requireFresh, requireMember } from './identity.js'
@@ -265,15 +265,6 @@ export function statusTool(deps, options = {}) {
     },
     render: (args, value) => [{ type: 'text', text: renderStatus(value) }],
   })
-}
-
-/** The distinct goal items the tasks say they cover, in first-seen order. */
-function goalItemsOf(tasks) {
-  const seen = new Set()
-  for (const task of tasks) {
-    for (const item of task.coverageOf ?? []) if (!seen.has(item)) seen.add(item)
-  }
-  return [...seen]
 }
 
 /** One line per fact, grouped so a reader can scan for the section it wants. */

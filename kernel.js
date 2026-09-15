@@ -31,6 +31,7 @@ import { installRetiredMemberGuard } from './src/runner/retired-guard.js'
 import { createFlowStore } from './src/store/index.js'
 import { createPlanHooks } from './src/store/hooks.js'
 import { createProfileRegistry, describeProfiles } from './src/store/profile-registry.js'
+import { createSourceRegistry } from './src/store/sources.js'
 import { installFlowTools } from './src/tools/index.js'
 import { RETIRED_MEMBERS_FILE, mergeRetiredMemberIds, parseRetiredMemberIds, serializeRetiredMemberIds } from './src/rules/index.js'
 
@@ -50,6 +51,10 @@ export const RUNNERS = Object.freeze(['manual', 'subagents'])
  * @param config.runner - `'subagents'` (the default) or `'manual'`.
  * @param config.captainPrompt - deployment-level captain instructions.
  * @param config.memberProvider - the subagent provider members are started with.
+ * @param config.agentTeamsStateDir - an existing  directory to
+ *   read teams from, for a deployment migrating off that plugin. Absent leaves
+ *   the source unregistered, which is different from registering it over a
+ *   missing directory.
  * @returns the mounted pieces, so a caller can inspect what it got.
  */
 export function installFlowKernel(ctx, config = {}) {
@@ -148,7 +153,31 @@ export function installFlowKernel(ctx, config = {}) {
     })
   }
 
-  return { store, profiles, runner, tools, retired, stateDir, runnerName }
+  // Where teams come from. The native source is this store; the agent-teams one
+  // is registered only when a deployment points at an existing `.agent-teams`
+  // directory, because "not migrating" and "migrating from an empty directory"
+  // are different states and only the first should leave the source absent.
+  const sources = createSourceRegistry({
+    native: store.service,
+    ...config.agentTeamsStateDir === undefined
+      ? {}
+      : { agentTeamsRoot: resolve(config.agentTeamsStateDir) },
+    onMalformedLine: (teamId, memberName, line, error) => onWarn(
+      `${teamId}/${memberName} mailbox line ${line}: ${error.message}`,
+    ),
+  })
+
+  // Named for the host's own seam convention. A deployment that wants to read
+  // agent-teams' teams without its executor mounted gets: the canvas shows both
+  // sets of teams, the tools act on ours, and nothing runs the other one.
+  //
+  // `provide` is itself an effect — it registers the service inside the
+  // calling fiber and releases it when that fiber is disposed — so this needs
+  // no matching teardown of its own. Optional-called because a test context
+  // has no services to provide to.
+  ctx.provide?.('flowTeamSources', sources)
+
+  return { store, profiles, runner, tools, retired, sources, stateDir, runnerName }
 }
 
 /**

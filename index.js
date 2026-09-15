@@ -1301,7 +1301,7 @@ export function apply(ctx, config) {
       // would be a second record of a team, able to disagree with the log.
       if (path === '/dsh-flow/map-api/teams' && req.method === 'GET') {
         if (kernel === undefined) return sendJson(res, 200, { teams: [] })
-        return sendJson(res, 200, await canvasSnapshot(kernel.store.service, {
+        return sendJson(res, 200, await canvasSnapshot(kernel.sources, {
           onMalformedLine: (teamId, memberName, line, error) => ctx.logger.warn(
             `dsh-flow: ${teamId}/${memberName} mailbox line ${line}: ${error.message}`,
           ),

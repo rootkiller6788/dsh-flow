@@ -17,7 +17,9 @@
 //   the record, so a canvas trusting it would show a member working forever.
 //   What can be derived from durable facts — the tasks it owns — cannot go
 //   stale that way.
-import { ownedOpenTask, taskDepthsById, taskVisualState, unsatisfiedDependencies } from '../rules/index.js'
+import {
+  isTeamState, ownedOpenTask, projectTeam, taskDepthsById, taskVisualState, unsatisfiedDependencies,
+} from '../rules/index.js'
 
 /** Member statuses the record can hold, mapped to what a reader should see. */
 function memberView(member, team) {
@@ -98,36 +100,48 @@ export function teamSnapshot(team, options = {}) {
 }
 
 /**
- * Every live team, as the canvas reads them.
+ * Every team every source can see, as the canvas reads them.
  *
  * The inboxes are read here rather than left to the caller because the counts
  * are part of what the canvas shows, and a projection that reported zero unread
  * mail for everybody would be wrong in a way nobody would notice — a member
  * with a message waiting would look like a member with nothing to say.
  *
- * @param service - the store's service, which owns the inboxes.
- * @param options.onMalformedLine - forwarded to the mailbox reader, so a
+ * A team from a read-only source is projected from its own record rather than
+ * from a log it has not got: its events are synthesized so the same projection
+ * applies, which is what lets one canvas draw both without a branch per view.
+ *
+ * @param registry - the source registry.
+ * @param options.onMalformedLine - forwarded to the mailbox readers, so a
  *   damaged line shows up as a diagnostic rather than as silence.
- * @returns `{ teams }`.
+ * @returns `{ teams }`, each naming the source it came from.
  */
-export async function canvasSnapshot(service, options = {}) {
+export async function canvasSnapshot(registry, options = {}) {
   const teams = []
-  for (const teamId of await service.listTeamIds()) {
-    const team = await service.readTeam(teamId)
-    if (team === undefined) continue
+  for (const { teamId, source } of await registry.enumerate()) {
+    const entry = registry.get(source)
+    if (entry === undefined) continue
+    const team = entry.writable === true
+      ? await entry.readTeam(teamId)
+      : projectTeam(await entry.load(teamId))?.state
+    if (team === undefined || !isTeamState({ ...team, id: teamId }, teamId)) continue
+
     const counts = new Map()
     for (const member of team.members) {
       if (member.status === 'removed') continue
-      const unread = await service.readUnreadMailbox(teamId, member.name, options.onMalformedLine)
-      counts.set(member.name, unread.length)
+      const unread = await entry.readMailbox(teamId, member.name, options.onMalformedLine)
+      counts.set(member.name, unread.filter(message => message.readAt === undefined).length)
     }
-    const captainInbox = (await service.readUnreadMailbox(teamId, 'captain', options.onMalformedLine))
+    const captainInbox = (await entry.readMailbox(teamId, 'captain', options.onMalformedLine))
+      .filter(message => message.readAt === undefined)
       .slice(0, 8)
       .map(message => ({ from: message.from, content: message.content, ts: message.ts }))
-    teams.push(teamSnapshot(team, {
-      unread: name => counts.get(name) ?? 0,
-      captainInbox,
-    }))
+
+    teams.push({
+      ...teamSnapshot({ ...team, id: teamId }, { unread: name => counts.get(name) ?? 0, captainInbox }),
+      source,
+      writable: entry.writable === true,
+    })
   }
   return { teams }
 }

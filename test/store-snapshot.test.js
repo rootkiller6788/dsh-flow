@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createFlowStore } from '../src/store/index.js'
+import { createSourceRegistry } from '../src/store/sources.js'
 import { canvasSnapshot, teamSnapshot } from '../src/store/snapshot.js'
 import { teamEvent } from '../src/rules/index.js'
 
@@ -43,10 +44,10 @@ async function open(t, extra = []) {
   const { service } = createFlowStore({ root, hooks: inert })
   await service.createTeam('T')
   await service.appendEvents('T', [...log(), ...extra])
-  return service
+  return { service, registry: createSourceRegistry({ native: service }) }
 }
 
-const teamOf = async service => (await canvasSnapshot(service)).teams[0]
+const teamOf = async opened => (await canvasSnapshot(opened.registry)).teams[0]
 
 test('the snapshot names the team the way the canvas addresses it', async t => {
   const [team] = [await teamOf(await open(t))]
@@ -86,8 +87,8 @@ test('a member carries its work counts and what it holds now', async t => {
 })
 
 test('a removed member is not in the roster, but its work still is', async t => {
-  const service = await open(t, [teamEvent('member.removed', { id: 'child-b', reason: 'done' }, 1010, 10)])
-  const team = await teamOf(service)
+  const opened = await open(t, [teamEvent('member.removed', { id: 'child-b', reason: 'done' }, 1010, 10)])
+  const team = await teamOf(opened)
   assert.deepEqual(team.members.map(member => member.name), ['a'])
   assert.equal(team.tasks.length, 3, 'the tasks it never touched are unaffected')
 })
@@ -99,33 +100,33 @@ test('a roster with no mail reports zero unread, not nothing', async t => {
 })
 
 test('the captain inbox carries what is owed, and nothing else', async t => {
-  const service = await open(t)
-  await service.appendMessage('T', 'captain', { id: 'm1', from: 'a', to: 'captain', content: 'blocked', ts: 2000 })
-  const team = (await canvasSnapshot(service)).teams[0]
+  const opened = await open(t)
+  await opened.service.appendMessage('T', 'captain', { id: 'm1', from: 'a', to: 'captain', content: 'blocked', ts: 2000 })
+  const team = (await canvasSnapshot(opened.registry)).teams[0]
   assert.deepEqual(team.captainInbox, [{ from: 'a', content: 'blocked', ts: 2000 }])
 })
 
 test('an unread member message shows up as a count and a preview', async t => {
-  const service = await open(t)
-  await service.appendMessage('T', 'a', { id: 'm1', from: 'captain', to: 'a', content: 'status?', ts: 2000 })
-  const team = (await canvasSnapshot(service)).teams[0]
+  const opened = await open(t)
+  await opened.service.appendMessage('T', 'a', { id: 'm1', from: 'captain', to: 'a', content: 'status?', ts: 2000 })
+  const team = (await canvasSnapshot(opened.registry)).teams[0]
   assert.equal(team.members.find(member => member.name === 'a').unread, 1)
 })
 
 test('an ended team is still reported, marked as archived', async t => {
   // The canvas shows ended teams as history; dropping them would make a
   // finished run vanish rather than settle.
-  const service = await open(t, [teamEvent('team.archived', {}, 1010, 10)])
-  await service.archiveTeam('T')
+  const opened = await open(t, [teamEvent('team.archived', {}, 1010, 10)])
+  await opened.service.archiveTeam('T')
   // Archived teams are not in the live list: the canvas reads the live set.
-  assert.deepEqual((await canvasSnapshot(service)).teams, [])
+  assert.deepEqual((await canvasSnapshot(opened.registry)).teams, [])
 })
 
 test('the snapshot is a copy, so a view cannot mutate the store through it', async t => {
-  const service = await open(t)
-  const before = await service.readTeam('T')
+  const opened = await open(t)
+  const before = await opened.service.readTeam('T')
   const team = teamSnapshot(before, {})
   team.tasks[0].subject = 'changed'
   team.members.length = 0
-  assert.equal((await service.readTeam('T')).tasks[0].subject, 'first')
+  assert.equal((await opened.service.readTeam('T')).tasks[0].subject, 'first')
 })

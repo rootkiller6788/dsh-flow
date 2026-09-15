@@ -36,6 +36,11 @@
         # The subagent provider members are started with.
         memberProvider: spawn
 
+        # An existing .agent-teams directory to read teams from. Leave it out
+        # unless you are migrating: registering it makes the canvas show both
+        # sets of teams at once, and the flow_* tools keep acting on ours.
+        # agentTeamsStateDir: .agent-teams
+
         # A member cap for profile rosters and for the teams they produce.
         maxMembers: 8
 

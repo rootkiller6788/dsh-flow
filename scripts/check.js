@@ -60,7 +60,7 @@ function resolveFrom(importer, specifier) {
 // Node side and have no business reaching a browser. The allowlist is a serve
 // boundary, so "forgot to add it" and "added it by mistake" are both failures,
 // in opposite directions.
-const SERVER_ONLY_PREFIXES = ['runner/', 'tools/']
+const SERVER_ONLY_PREFIXES = ['runner/', 'tools/', 'store/']
 
 const problems = []
 for (const [name, module] of modules) {

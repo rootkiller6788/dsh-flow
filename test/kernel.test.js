@@ -71,8 +71,21 @@ function fakeHost(options = {}) {
   const admissions = []
   let children = 0
 
+  const provided = new Map()
   const ctx = {
     logger: { warn: message => { calls.warnings.push(message) }, info: () => {}, error: () => {} },
+    /**
+     * The host's service seam.
+     *
+     * Modelled rather than stubbed because the one thing it enforces is the
+     * constraint both seams are shaped around: one provider per name. A second
+     * `provide` under the same name is an error, which is why the sources seam
+     * is a registry and the executor seam is a decision made at mount.
+     */
+    provide(name, value) {
+      if (provided.has(name)) throw new Error(`service "${name}" has been registered`)
+      provided.set(name, value)
+    },
     agents: {
       get: id => agents.get(id),
       list: () => [...agents.values()],
@@ -120,6 +133,7 @@ function fakeHost(options = {}) {
     ctx,
     calls,
     agents,
+    provided,
     /** Deliver a host event to every handler registered for it. */
     emit(event, payload) {
       for (const handler of listeners.get(event) ?? []) handler(payload)
@@ -166,6 +180,34 @@ test('mounting registers every declared tool and no others', async t => {
   // The set the role rules deny a member and the set actually registered have
   // to be the same, or a member keeps a captain's tool with nothing refusing it.
   assert.deepEqual(registered.map(definition => definition.name), [...FLOW_TOOL_NAMES])
+})
+
+test('the team registry is provided whole, as the core the sources seam sits beside', async t => {
+  const { ctx, kernel, provided } = mount(t)
+  // Whole, not a curated face. A hand-picked subset would be a second
+  // definition of "the team registry", and nothing would keep the two in step.
+  assert.equal(provided.get('flowTeams'), kernel.store.service)
+  assert.notEqual(provided.get('flowTeamSources'), undefined)
+
+  // The host refuses a second provider under one name. That single rule is why
+  // the sources seam is a registry — several sources genuinely coexist — while
+  // the executor seam has to be decided at mount.
+  assert.throws(() => ctx.provide('flowTeams', {}), /has been registered/)
+})
+
+test('the core and the seam answer different questions', async t => {
+  // `flowTeams` is what this deployment has; `flowTeamSources` is every team any
+  // registered source can see, tagged with where it came from. During a
+  // migration the second is a superset of the first, which is the whole reason
+  // they are not one thing.
+  const { provided, tool, captain } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+
+  assert.deepEqual(await provided.get('flowTeams').listTeamIds(), [created.teamId])
+  assert.deepEqual(
+    (await provided.get('flowTeamSources').enumerate()).map(entry => entry.teamId),
+    [created.teamId],
+  )
 })
 
 test('a manual mount still serves every tool, and simply never executes', async t => {

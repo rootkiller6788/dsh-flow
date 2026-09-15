@@ -45,6 +45,18 @@ let failures = 0
 const clone = value => JSON.parse(JSON.stringify(value))
 const show = value => value === undefined ? 'undefined' : JSON.stringify(value)
 
+/**
+ * Rewrite the original's tool names to ours before comparing.
+ *
+ * Some of what these rules return is text a *captain* is meant to act on, and
+ * the original names its own tools — ported verbatim, `describeQualityLoop`
+ * told the model to call `agent_teams_resume`, which this plugin never
+ * registers, so a captain following it would call something that does not
+ * exist. The divergence is deliberate and narrow: every other word of every
+ * sentence is still compared, so a real drift in the wording still fails.
+ */
+const nameOurTools = text => text.replaceAll('agent_teams_', 'flow_')
+
 function same(label, expected, actual) {
   checks++
   const left = show(expected)
@@ -722,9 +734,9 @@ for (const [label, a, b] of [
 
   let mismatches = 0
   for (const [label, value] of teams) {
-    const a = gates.describeQualityLoop(clone(value))
-    const b = ours.describeQualityLoop(clone(value))
-    if (show(a) !== show(b)) { mismatches++; differ(`describeQualityLoop [${label}]`, `original ${show(a)}\n      ours     ${show(b)}`) }
+    const a = nameOurTools(show(gates.describeQualityLoop(clone(value))))
+    const b = nameOurTools(show(ours.describeQualityLoop(clone(value))))
+    if (a !== b) { mismatches++; differ(`describeQualityLoop [${label}]`, `original ${a}\n      ours     ${b}`) }
   }
   if (mismatches === 0) console.log(`ok    describeQualityLoop over ${teams.length} teams (halt > deliverable, escalation > blocked)`)
   else failures++
@@ -1079,7 +1091,7 @@ for (const [label, a, b] of [
         return
       }
       if (!expected.ok) { bothThrew++; if (expected.error !== mine.error) note(`fuzz ${label} round ${round}`, `threw differently: "${expected.error}" vs "${mine.error}"`); return }
-      if (show(expected.value) !== show(mine.value)) {
+      if (nameOurTools(show(expected.value)) !== nameOurTools(show(mine.value))) {
         note(`fuzz ${label} round ${round}`, `original ${show(expected.value).slice(0, 160)}\n      ours     ${show(mine.value).slice(0, 160)}`)
       }
     }

@@ -119,7 +119,10 @@ export function describeQualityLoop(team) {
       halted: true,
       escalated: team.escalated === true,
       deliverable: false,
-      summary: 'Team is halted. Call agent_teams_resume with a reason before creating more work.',
+      // Names *our* tool. The ported text said `agent_teams_resume`, which is a
+      // tool this plugin never registers — so a captain following it would call
+      // something that does not exist, and the halt would look unresumable.
+      summary: 'Team is halted. Call flow_resume with a reason before creating more work.',
     }
   }
   if (delivery.ok) {

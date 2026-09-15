@@ -17,6 +17,7 @@
     "src",
     "assets",
     "theme.css",
+    "kernel.js",
     "cordis.patch.yml",
     "README.md",
     "DESIGN.md"
@@ -25,7 +26,8 @@
     "build": "node scripts/check.js",
     "prepare": "pnpm run build",
     "test": "node --test \"test/**/*.test.js\"",
-    "test:diff": "node scripts/diff-agent-teams.mjs"
+    "test:diff": "node scripts/diff-agent-teams.mjs",
+    "test:rehearsal": "node scripts/rehearsal-agent-teams.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

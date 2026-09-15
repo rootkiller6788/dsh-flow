@@ -95,6 +95,24 @@ async function submitDraft() {
     setError(error)
   }
 }
+/**
+ * Fetch one task's attempt history and remember it.
+ *
+ * A failure is kept as a message rather than thrown: the panel is already open,
+ * and an unhandled rejection would leave it showing the previous task's
+ * timeline with nothing to say that the new one never arrived.
+ */
+async function loadTaskHistory(key, teamId, taskId) {
+  try {
+    const path = `/dsh-flow/map-api/teams/${encodeURIComponent(teamId)}/tasks/${encodeURIComponent(taskId)}`
+    state.taskHistory.set(key, await api(path))
+    state.taskHistoryError = ''
+  } catch (error) {
+    state.taskHistoryError = error instanceof Error ? error.message : String(error)
+  }
+  render()
+}
+
 async function archiveThread(thread) {
   if (!window.confirm(`归档画布中的「${thread.title}」及其分支？DSH 原会话会保留，可在 DSH 内继续查看。`)) return
   await api(`/dsh-flow/map-api/threads/${thread.id}`, { method: 'DELETE' })
@@ -251,6 +269,17 @@ app.addEventListener('click', async event => {
       const followup = selectionFollowup
       hideSelectionFollowup()
       if (followup !== null && thread !== undefined && thread.id === followup.threadId && state.draft === null) openContinue(thread, undefined, followup.text)
+      return
+    }
+    if (button.dataset.action === 'show-task' && button.dataset.team !== undefined && button.dataset.task !== undefined) {
+      const key = `${button.dataset.team}:${button.dataset.task}`
+      // Closing is local and instant. Opening paints whatever is already cached
+      // and then refreshes: the history grows while work is running, so a cached
+      // one shown without a refresh would be a timeline that stopped.
+      if (state.expandedTaskId === key) { state.expandedTaskId = null; render(); return }
+      state.expandedTaskId = key
+      render()
+      void loadTaskHistory(key, button.dataset.team, button.dataset.task)
       return
     }
     if (button.dataset.action === 'insert-quick-phrase' && button.dataset.quickPhrase !== undefined) insertQuickPhrase(button.dataset.quickPhrase)

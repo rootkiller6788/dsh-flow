@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { installFlowKernel } from './kernel.js'
-import { canvasSnapshot } from './src/store/snapshot.js'
+import { isTeamId } from './src/rules/index.js'
+import { canvasSnapshot, readTaskHistory } from './src/store/snapshot.js'
 
 export const name = 'dsh-flow'
 export const inject = ['webServer', 'sessions']
@@ -1291,6 +1292,21 @@ export function apply(ctx, config) {
         const body = await readJson(req)
         return sendJson(res, 200, await store.projection(body?.sessionIds, body?.cursors))
       }
+      // One task's attempt history. A sub-resource rather than a field on the
+      // team snapshot: the snapshot is polled every second and this is read only
+      // when somebody opens a row.
+      const taskHistory = /^\/dsh-flow\/map-api\/teams\/([^/]+)\/tasks\/([^/]+)$/.exec(path)
+      if (taskHistory !== null && req.method === 'GET') {
+        if (kernel === undefined) throw new NotFoundError('this deployment mounted no team kernel')
+        const [, teamId, taskId] = taskHistory.map(decodeURIComponent)
+        // The id comes off the wire, and an id is a path segment — the source
+        // would refuse it anyway, but refusing it here names the right reason.
+        if (!isTeamId(teamId) || !isTeamId(taskId)) throw new InputError('团队或任务 id 不合法')
+        const history = await readTaskHistory(kernel.store.service, teamId, taskId)
+        if (history === undefined) throw new NotFoundError('没有这个团队或任务')
+        return sendJson(res, 200, history)
+      }
+
       const messages = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)\/messages$/i.exec(path)
       if (messages !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.addMessage(messages[1], (await readJson(req)).text) })
       const thread = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)$/i.exec(path)

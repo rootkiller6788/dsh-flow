@@ -19,7 +19,8 @@
 //   stale that way.
 import {
   buildCoverageMatrix, canDeclareDelivery, describeQualityLoop, goalItemsOf, isTeamState,
-  ownedOpenTask, projectTeam, taskDepthsById, taskVisualState, unsatisfiedDependencies,
+  ownedOpenTask, projectTeam, taskAttempts, taskDepthsById, taskRollbacks, taskVisualState,
+  unsatisfiedDependencies,
 } from '../rules/index.js'
 
 /** Member statuses the record can hold, mapped to what a reader should see. */
@@ -120,6 +121,38 @@ export function teamSnapshot(team, options = {}) {
     delivery: canDeclareDelivery(team),
     coverage: buildCoverageMatrix(goalItemsOf(team.tasks), team.tasks),
     captainInbox: options.captainInbox ?? [],
+  }
+}
+
+/**
+ * One task's history: every attempt that started, and every rollback recorded.
+ *
+ * Read on demand rather than carried in the team snapshot. A team may have
+ * dozens of tasks, and the canvas polls the snapshot once a second — putting
+ * every task's full history into that response would make the poll pay, every
+ * second, for something it renders only when a reader opens one row.
+ *
+ * This is the part agent-teams' snapshot model structurally cannot offer: it
+ * keeps a monotonic `attempt` counter, so it can say how many attempts happened
+ * and never what became of any of them.
+ *
+ * @param service - the store's service.
+ * @param teamId - the team.
+ * @param taskId - the task to trace.
+ * @returns `{ taskId, subject, attempts, rollbacks }`, or `undefined` for a team
+ *   or task that does not exist — which the caller turns into a 404 rather than
+ *   an empty timeline that reads like a task nobody ever attempted.
+ */
+export async function readTaskHistory(service, teamId, taskId) {
+  const team = await service.readTeam(teamId)
+  const task = team?.tasks.find(candidate => candidate.id === taskId)
+  if (task === undefined) return undefined
+  const events = await service.readTeamEvents(teamId)
+  return {
+    taskId: task.id,
+    subject: task.subject ?? task.id,
+    attempts: taskAttempts(events, taskId),
+    rollbacks: taskRollbacks(events, taskId),
   }
 }
 

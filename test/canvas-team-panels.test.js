@@ -17,7 +17,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  coverageHtml, deliveryHtml, loopHtml, qualityPanelHtml, taskStateLabel,
+  attemptTimelineHtml, clockOf, coverageHtml, deliveryHtml, loopHtml, qualityPanelHtml, taskStateLabel,
 } from '../src/canvas/team-panels.js'
 
 test('a task display state gets a label, and an unknown one is shown as itself', () => {
@@ -110,6 +110,62 @@ test('model output cannot break out of the panel', () => {
   assert.doesNotMatch(html, /<img/)
   assert.doesNotMatch(html, /onerror="alert/)
   assert.match(html, /&lt;img src=x/)
+})
+
+// --- one task's attempt timeline -------------------------------------------
+
+test('a timestamp is local wall clock, formatted the same way every time', () => {
+  // Built from a local-time Date so the expectation holds in any zone; the
+  // point is the format, not the zone.
+  assert.equal(clockOf(new Date(2026, 0, 2, 3, 4, 5).getTime()), '03:04:05')
+  for (const value of [undefined, null, 'x', Number.NaN]) assert.equal(clockOf(value), '', String(value))
+})
+
+test('attempts and rollbacks read as one sequence, not two lists', () => {
+  // The reader is reconstructing what happened. Two lists would make them do
+  // the merge in their head, and the ordering is the whole story here.
+  const html = attemptTimelineHtml({
+    taskId: 't1',
+    subject: 'pin it',
+    attempts: [
+      { attemptId: 'a1', at: 1000, assignee: '建模手', outcome: 'failed', reason: 'quota', code: 'QUOTA' },
+      { attemptId: 'a2', at: 3000, assignee: '程序员', outcome: 'started' },
+    ],
+    rollbacks: [{ at: 2000, toStatus: 'pending', reason: 'quota', attemptId: 'a1' }],
+  })
+  const rollbackAt = html.indexOf('回滚')
+  const secondAttemptAt = html.indexOf('#2')
+  assert.ok(rollbackAt !== -1 && secondAttemptAt !== -1)
+  assert.ok(rollbackAt < secondAttemptAt, 'the rollback sorts between the two attempts')
+  assert.match(html, /pin it/, 'the open row names the task it belongs to')
+  assert.match(html, /2 次/)
+  assert.match(html, /QUOTA/)
+  assert.match(html, /建模手/)
+})
+
+test('an attempt that is not finished says so rather than reading as a failure', () => {
+  // "started with no outcome" is the ordinary state of work in flight, and
+  // showing it as anything else would make a healthy team look broken.
+  const html = attemptTimelineHtml({ taskId: 't1', subject: 'x', attempts: [{ attemptId: 'a', at: 1, outcome: 'started' }], rollbacks: [] })
+  assert.match(html, /未收尾/)
+  assert.doesNotMatch(html, /失败/)
+})
+
+test('a task nobody has tried says so, rather than rendering an empty box', () => {
+  const html = attemptTimelineHtml({ taskId: 't1', subject: 'later', attempts: [], rollbacks: [] })
+  assert.match(html, /还没有任何尝试/)
+  assert.equal(attemptTimelineHtml(undefined), '')
+})
+
+test('a timeline escapes what the log recorded', () => {
+  const hostile = '<script>alert(1)</script>'
+  const html = attemptTimelineHtml({
+    taskId: 't1', subject: hostile,
+    attempts: [{ attemptId: 'a', at: 1, assignee: hostile, outcome: 'failed', reason: hostile }],
+    rollbacks: [],
+  })
+  assert.doesNotMatch(html, /<script>/)
+  assert.match(html, /&lt;script&gt;/)
 })
 
 test('the three sections compose, and any of them may be absent', () => {

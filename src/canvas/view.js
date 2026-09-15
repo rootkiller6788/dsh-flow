@@ -3,7 +3,7 @@ import { state, app, Engine, escapeHtml, selectorValue, whoVars, whoSolid, turnP
 import { renderMarkdown } from './markdown.js'
 import { relayOf } from './relay.js'
 import { messagesFor, latestMessage } from './session.js'
-import { qualityPanelHtml, taskStateLabel } from './team-panels.js'
+import { attemptTimelineHtml, qualityPanelHtml, taskStateLabel } from './team-panels.js'
 import { memberArtUrl, captainArtUrl, actionArtUrl } from './artwork.js'
 import { edgePathFor, buildScene } from './scene.js'
 
@@ -404,11 +404,29 @@ function renderTeamInspector(node) {
       <div class="team-member-info">${identity}${member.currentTask ? `<div class="team-member-task">正在：${escapeHtml(member.currentTask)}</div>` : ''}<div class="meter"><div class="meter-track"><div class="meter-fill" style="width:${pct}%"></div></div><span class="meter-label">${member.done ?? 0}/${member.total ?? 0}</span></div></div>
     </div>`
   }).join('')
-  const tasks = (team.tasks ?? []).map(task => `<div class="task-dep-row"><span class="task-dep-id">${escapeHtml(task.id ?? '')}</span><span class="task-dep-subject">${escapeHtml(task.subject ?? task.id)}</span><span class="chip chip--state-${escapeHtml(task.state)}">${escapeHtml(taskStateLabel(task.state))}</span></div>`).join('')
+  // Each row opens its own attempt history. A button rather than a row with a
+  // handler: the click path already routes `[data-action]` before anything else,
+  // and a real button is the only version a keyboard can reach.
+  const tasks = (team.tasks ?? []).map(task => {
+    const key = `${team.teamId}:${task.id}`
+    const open = state.expandedTaskId === key
+    return `<button type="button" class="task-dep-row${open ? ' is-open' : ''}" data-action="show-task" data-team="${escapeHtml(team.teamId)}" data-task="${escapeHtml(task.id ?? '')}" aria-expanded="${open ? 'true' : 'false'}"><span class="task-dep-id">${escapeHtml(task.id ?? '')}</span><span class="task-dep-subject">${escapeHtml(task.subject ?? task.id)}</span><span class="chip chip--state-${escapeHtml(task.state)}">${escapeHtml(taskStateLabel(task.state))}</span></button>`
+  }).join('')
+  // The timeline belongs to whichever task of *this* team is open. Nothing else
+  // on the canvas can open one, so a key from another team is simply not ours.
+  const openKey = state.expandedTaskId !== null && state.expandedTaskId.startsWith(`${team.teamId}:`)
+    ? state.expandedTaskId
+    : null
+  const timeline = openKey === null
+    ? ''
+    : attemptTimelineHtml(state.taskHistory.get(openKey))
+      // Either still in flight or failed. Saying which beats an empty gap where
+      // a timeline was just promised by the row lighting up.
+      || `<section class="process"><div class="quality-summary">${state.taskHistoryError === '' ? '正在读取尝试记录…' : escapeHtml(state.taskHistoryError)}</div></section>`
   // Captain inbox: the member → captain messages still owed to the captain.
   const inbox = Array.isArray(team.captainInbox) ? team.captainInbox.slice(0, 8) : []
   const inboxHtml = inbox.length === 0 ? '' : `<section class="process"><div class="bubble-who">队长收件箱 · 最新 ${inbox.length} 条</div>${inbox.map(item => `<div class="bubble"><img class="bubble-portrait" src="${captainArtUrl()}" alt=""><div style="min-width:0;flex:1"><div class="bubble-who">${escapeHtml(item.from ?? '')}<span class="bubble-route">队长</span></div><div class="bubble-body"><div class="md">${renderMarkdown(item.content ?? '')}</div></div></div></div>`).join('')}</section>`
-  return `<header class="inspector-head"><div><div class="inspector-meta"><span>${node.halted ? '已停止' : node.phase === 'running' ? '运行中' : '待确认'}</span><span>${(team.members ?? []).length} 名成员</span><span>${(team.tasks ?? []).filter(task => task.state === 'completed').length}/${(team.tasks ?? []).length} 任务完成</span></div><h2 class="inspector-title">${escapeHtml(team.name ?? team.teamId)}</h2></div><button class="inspector-close" type="button" data-action="close-inspector" aria-label="关闭详情" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="inspector-scroll"><div class="team-member-list">${members}</div>${tasks === '' ? '' : `<section class="process"><div class="bubble-who">任务依赖</div>${tasks}</section>`}${qualityPanelHtml(team)}${inboxHtml}</div><footer class="inspector-foot"></footer>`
+  return `<header class="inspector-head"><div><div class="inspector-meta"><span>${node.halted ? '已停止' : node.phase === 'running' ? '运行中' : '待确认'}</span><span>${(team.members ?? []).length} 名成员</span><span>${(team.tasks ?? []).filter(task => task.state === 'completed').length}/${(team.tasks ?? []).length} 任务完成</span></div><h2 class="inspector-title">${escapeHtml(team.name ?? team.teamId)}</h2></div><button class="inspector-close" type="button" data-action="close-inspector" aria-label="关闭详情" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="inspector-scroll"><div class="team-member-list">${members}</div>${tasks === '' ? '' : `<section class="process"><div class="bubble-who">任务依赖</div>${tasks}</section>`}${timeline}${qualityPanelHtml(team)}${inboxHtml}</div><footer class="inspector-foot"></footer>`
 }
 
 function renderInspector() {

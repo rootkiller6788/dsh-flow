@@ -308,6 +308,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .coverage-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 6px 10px; }
 .coverage-item { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .coverage-tasks { flex: none; color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
+.attempt-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 6px 10px; }
+.attempt-row--rollback { border-style: dashed; background: var(--panel-2); }
+.attempt-seq { flex: none; color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 650; }
+.attempt-at { flex: none; color: var(--faint); font-family: var(--mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.attempt-who { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.attempt-code { flex: none; border-radius: var(--r-sm); background: var(--err-soft); padding: 1px 6px; color: var(--err); font-family: var(--mono); font-size: 10.5px; }
+.attempt-why { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.attempt-row > .chip { margin-left: auto; }
 
 /* ── Team inspector: portrait member rows + task dependency list ──────── */
 .team-member-list { display: flex; flex-direction: column; gap: 10px; }
@@ -320,7 +328,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .team-member-role { overflow: hidden; color: var(--faint); font-size: 10.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .team-member-model { margin-left: auto; overflow: hidden; color: var(--faint); font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .team-member-task { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.task-dep-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 7px 10px; }
+.task-dep-row { display: flex; width: 100%; align-items: center; gap: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 7px 10px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.task-dep-row:hover { border-color: var(--accent-line); }
+.task-dep-row.is-open { border-color: var(--accent); background: var(--accent-soft); }
 .task-dep-id { flex: none; min-width: 24px; color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 650; }
 .task-dep-subject { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .bubble-portrait { width: 44px; height: 44px; object-fit: contain; border-radius: var(--r-md); background: var(--panel-2); border: 1px solid var(--line); flex: none; margin-top: 2px; }

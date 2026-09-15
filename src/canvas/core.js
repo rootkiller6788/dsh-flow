@@ -50,6 +50,10 @@ const state = {
   branchAnchors: new Map(), collapsedCardIds: new Set(), quickPhrases: DEFAULT_QUICK_PHRASES, quickPhraseEditorOpen: false,
   mapCardSessionSwitches: new Set(), expandedMessageIds: new Set(),
   teams: [], teamsSignature: '', teamsError: false, teamsLoaded: false,
+  // One task's attempt history, fetched on demand rather than polled: the team
+  // snapshot is read once a second and a history is read only when a reader
+  // opens a row. Keyed by `${teamId}:${taskId}` so two open rows cannot collide.
+  taskHistory: new Map(), taskHistoryError: '', expandedTaskId: null,
   dragging: false, canvasGesture: false, canvasRefreshAfter: 0, needsCenter: true, cameraTouched: false,
   inspectorId: null, inspectorOpening: false, inspectorScrollById: new Map(),
   scene: null, sceneById: null, sceneEdges: null,

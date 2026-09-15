@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createFlowStore } from '../src/store/index.js'
 import { createSourceRegistry } from '../src/sources/sources.js'
-import { canvasSnapshot, teamSnapshot } from '../src/store/snapshot.js'
+import { canvasSnapshot, readTaskHistory, teamSnapshot } from '../src/store/snapshot.js'
 import { teamEvent } from '../src/rules/index.js'
 
 const inert = { buildTeam: async () => {}, planEdits: () => [], spawnMembers: async () => 0, kickTeam: async () => {} }
@@ -208,6 +208,46 @@ test('with no runtime the recorded status is the answer, and is not invented', a
   const opened = await open(t, [teamEvent('member.updated', { id: 'a', patch: { status: 'working' } }, 1010, 10)])
   const team = await teamOf(opened)
   assert.equal(team.members.find(member => member.name === 'a').activity, 'working')
+})
+
+// --- one task's history ----------------------------------------------------
+
+test('a task history carries every attempt that started', async t => {
+  const opened = await open(t)
+  const history = await readTaskHistory(opened.service, 'T', 't1')
+  assert.equal(history.taskId, 't1')
+  assert.equal(history.subject, 'first')
+  assert.deepEqual(history.attempts.map(entry => [entry.attemptId, entry.outcome]), [['att-1', 'started']])
+  assert.deepEqual(history.rollbacks, [])
+})
+
+test('an attempt that died and was taken back is told apart from one that never ran', async t => {
+  // This is the part agent-teams' snapshot model structurally cannot say: it
+  // keeps a monotonic counter, so afterwards a rolled-back task is
+  // indistinguishable from one nobody ever attempted.
+  const opened = await open(t)
+  await opened.service.appendEvents('T', [
+    teamEvent('task.attempt_failed', { id: 't1', attemptId: 'att-1', reason: 'dispatch failed', code: 'X' }, 1010, 10),
+    teamEvent('task.rolled_back', {
+      id: 't1', toStatus: 'pending', reason: 'dispatch failed', assignee: null, attempt: 1, attemptId: 'att-1', code: 'X',
+    }, 1011, 11),
+  ])
+  const history = await readTaskHistory(opened.service, 'T', 't1')
+  assert.deepEqual(history.attempts.map(entry => [entry.attemptId, entry.outcome, entry.reason]), [
+    ['att-1', 'failed', 'dispatch failed'],
+  ])
+  assert.deepEqual(history.rollbacks.map(entry => [entry.toStatus, entry.reason, entry.code]), [
+    ['pending', 'dispatch failed', 'X'],
+  ])
+})
+
+test('a team or a task that does not exist is nothing to show, not an empty timeline', async t => {
+  // An empty timeline reads like a task nobody ever attempted, which is a
+  // different statement from "there is no such task" — the caller turns this
+  // into a 404 instead of drawing the wrong one.
+  const opened = await open(t)
+  assert.equal(await readTaskHistory(opened.service, 'T', 'nope'), undefined)
+  assert.equal(await readTaskHistory(opened.service, 'ghost', 't1'), undefined)
 })
 
 // --- the three quality answers ---------------------------------------------

@@ -1156,13 +1156,17 @@ function sendFile(res, contentType, body, etag) {
 }
 /** The unified agent canvas: one page, one engine, one graph. */
 function canvasPage() {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/theme.css"></head><body><div id="app"></div><script src="/dsh-flow/engine.js"></script><script type="module" src="/dsh-flow/src/canvas.js"></script></body></html>`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/theme.css"></head><body><div id="app"></div><script src="/dsh-flow/engine.js"></script><script type="module" src="/dsh-flow/src/canvas/canvas.js"></script></body></html>`
 }
 
 // Deliberately explicit — this list is also the serve allowlist, so it must not
 // be auto-widened. The cost is that adding a module means adding it here too;
 // forgetting silently 404s the import and the canvas never boots.
-const CANVAS_SRC_FILES = ['rules/index.js', 'rules/constants.js', 'rules/sha256.js', 'rules/identifiers.js', 'rules/entities.js', 'rules/dependencies.js', 'rules/mailbox.js', 'rules/paths.js', 'rules/gates.js', 'rules/completion.js', 'rules/delivery.js', 'rules/coverage.js', 'rules/followup.js', 'rules/profiles.js', 'rules/events.js', 'rules/project.js', 'rules/reconcile.js', 'rules/plan.js', 'rules/manifest.js', 'rules/tool-names.js', 'rules/fallback.js', 'rules/model-route.js', 'rules/assignment.js', 'rules/attempts.js', 'rules/retired.js', 'core.js', 'html.js', 'markdown.js', 'relay.js', 'session.js', 'teams.js', 'scene.js', 'view.js', 'actions.js', 'canvas.js', 'artwork.js']
+//
+// Two layers are served: the pure rules core, which the canvas imports directly,
+// and the canvas modules themselves. Everything else under `src/` is host-only
+// and is asserted out of this list by `scripts/check.js`.
+const CANVAS_SRC_FILES = ['rules/index.js', 'rules/constants.js', 'rules/sha256.js', 'rules/identifiers.js', 'rules/entities.js', 'rules/dependencies.js', 'rules/mailbox.js', 'rules/paths.js', 'rules/gates.js', 'rules/completion.js', 'rules/delivery.js', 'rules/coverage.js', 'rules/followup.js', 'rules/profiles.js', 'rules/events.js', 'rules/project.js', 'rules/reconcile.js', 'rules/plan.js', 'rules/manifest.js', 'rules/tool-names.js', 'rules/fallback.js', 'rules/model-route.js', 'rules/assignment.js', 'rules/attempts.js', 'rules/retired.js', 'canvas/core.js', 'canvas/html.js', 'canvas/markdown.js', 'canvas/relay.js', 'canvas/session.js', 'canvas/teams.js', 'canvas/scene.js', 'canvas/view.js', 'canvas/actions.js', 'canvas/canvas.js', 'canvas/artwork.js']
 
 /**
  * Mount the dsh-flow routes on the existing DSH Web Server: the unified canvas

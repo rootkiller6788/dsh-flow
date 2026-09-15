@@ -103,17 +103,18 @@ dsh-flow (纯 JS，无运行时依赖)
 ├── engine.js           # 画布引擎：相机 / 手势 / 视口裁剪 / 连线几何 / 拖拽绑定（与业务无关，可复用）
 ├── theme.css           # 设计 token（浅/深一套变量）+ 全部组件样式
 ├── assets/             # 15 张立绘（9 职业 + 6 状态）
-├── src/                # 统一画布页面（ES 模块）
-│   ├── canvas.js       #   入口：宿主桥、实时回复、轮询、启动
-│   ├── core.js         #   共享状态、几何常量、localStorage、宿主桥接、成员配色
-│   ├── markdown.js     #   Markdown 渲染（含 ■ 分节规范化）
-│   ├── relay.js        #   智能体信封解析（中继/成员消息/子代理通知）
-│   ├── session.js      #   会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
-│   ├── teams.js        #   团队轮询（实时→快照回退）+ 层级区域布局
-│   ├── scene.js        #   场景装配：需求时间轴 + 嵌套区域 + 类型化连线
-│   ├── view.js         #   相机、虚拟化挂载、节点渲染、检查器、主渲染
-│   ├── artwork.js      #   立绘映射（角色关键词 → 职业图，状态 → 动作图）
-│   └── actions.js      #   交互：草稿 / 追问 / 分支 / 归档 / 快捷词 / 选择追问
+├── src/                # ES 模块，按层分目录
+│   └── canvas/         #   统一画布页面（浏览器侧，唯一会被 HTTP 服务的一层）
+│       ├── canvas.js   #     入口：宿主桥、实时回复、轮询、启动
+│       ├── core.js     #     共享状态、几何常量、localStorage、宿主桥接、成员配色
+│       ├── markdown.js #     Markdown 渲染（含 ■ 分节规范化）
+│       ├── relay.js    #     智能体信封解析（中继/成员消息/子代理通知）
+│       ├── session.js  #     会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
+│       ├── teams.js    #     团队轮询（实时→快照回退）+ 层级区域布局
+│       ├── scene.js    #     场景装配：需求时间轴 + 嵌套区域 + 类型化连线
+│       ├── view.js     #     相机、虚拟化挂载、节点渲染、检查器、主渲染
+│       ├── artwork.js  #     立绘映射（角色关键词 → 职业图，状态 → 动作图）
+│       └── actions.js  #     交互：草稿 / 追问 / 分支 / 归档 / 快捷词 / 选择追问
 ├── cordis.patch.yml    # 插入 dsh-flow 服务
 └── package.json        # dsh.bundle.patch + dsh.client.inject
 ```
@@ -128,7 +129,7 @@ dsh-flow (纯 JS，无运行时依赖)
 | --- | --- | --- |
 | GET | `/dsh-flow` | 302 → `/dsh-flow/` |
 | GET | `/dsh-flow/` | 统一画布页 |
-| GET | `/dsh-flow/engine.js` · `/dsh-flow/src/*.js` · `/dsh-flow/theme.css` | 画布资源 |
+| GET | `/dsh-flow/engine.js` · `/dsh-flow/src/canvas/*.js` · `/dsh-flow/src/rules/*.js` · `/dsh-flow/theme.css` | 画布资源 |
 | GET | `/dsh-flow/assets/*.png` | 立绘图（仅放行 `[a-z0-9-]+.png`） |
 | GET | `/dsh-flow/map` · `/dsh-flow/map/` | 302 → `/dsh-flow/`（旧路径兼容） |
 | * | `/dsh-flow/map-api/*` | 见下表 |
@@ -200,13 +201,13 @@ dsh-flow (纯 JS，无运行时依赖)
 
 ```sh
 node --check index.js && node --check client.js \
-  && node --check engine.js && for f in src/*.js; do node --check "$f"; done
+  && node --check engine.js && for f in src/canvas/*.js; do node --check "$f"; done
 
 dsh web
 # 对话区顶部标签行点「智能体画布」
 ```
 
-改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `src/*` / `theme.css` / `assets/*.png` 按 mtime 走内存缓存并以 `cache-control: no-cache` + ETag 复验——每次请求都会确认文件没变（变了就回 200 新内容），所以改完刷新页面即可。
+改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `src/**` / `theme.css` / `assets/*.png` 按 mtime 走内存缓存并以 `cache-control: no-cache` + ETag 复验——每次请求都会确认文件没变（变了就回 200 新内容），所以改完刷新页面即可。
 
 ## 已知边界
 

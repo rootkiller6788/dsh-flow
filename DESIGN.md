@@ -1,7 +1,7 @@
 # dsh-flow 设计系统
 
 > 一份 token 集，驱动两种配色。所有组件只准引用 token，不准写字面色值。
-> 实现：`theme.css`（唯一来源）。协议层：`src/markdown.js`、`src/relay.js`。
+> 实现：`theme.css`（唯一来源）。协议层：`src/canvas/markdown.js`、`src/canvas/relay.js`。
 
 ---
 
@@ -113,7 +113,7 @@
 4. **动效可关。** 一切过渡都要在 `@media (prefers-reduced-motion: reduce)`
    下退化为 `none`。
 5. **实例级变量必须带兜底。** 卡片按节点身份注入的 `--dot`（轮次色）、
-   `--who` / `--who-text`（头像配色）由 `src/view.js`、`src/core.js` 写在
+   `--who` / `--who-text`（头像配色）由 `src/canvas/view.js`、`src/canvas/core.js` 写在
    行内 style 上，因此**在 `theme.css` 里查不到定义**，这是正常的。
    用到它们时必须写成 `var(--dot, var(--accent))` 形式，兜底值本身也取自 token。
 
@@ -151,12 +151,12 @@ pnpm run build
 
 成员之间经 DSH 会话中继的消息，原文形如
 `Agent <uuid> sent a message:【发送者 → 接收者】正文`。
-`src/relay.js` 提供解析与兜底清洗（宿主与客户端共用一份规格），
+`src/canvas/relay.js` 提供解析与兜底清洗（宿主与客户端共用一份规格），
 渲染层永远不应看到裸 UUID。
 
 ### 6.2 Markdown
 
-`src/markdown.js` 是自写的合规解析器（delimiter stack），**不是正则近似**。
+`src/canvas/markdown.js` 是自写的合规解析器（delimiter stack），**不是正则近似**。
 
 - 行内：`` ` `` `` ` `` 代码、`**粗**`、`*斜*`、`~~删~~`、`[文字](链接)`、
   `<https://…>` 自动链接、`\` 转义。嵌套与孤儿定界符按 CommonMark 的

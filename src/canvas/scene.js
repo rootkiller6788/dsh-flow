@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 import { state, Engine, CLUSTER_GAP, TURN_W, TURN_H } from './core.js'
 import { conversationCards, conversationGraphView, draftPlacement } from './session.js'
 import { buildTeamHierarchy, buildFallbackCluster } from './teams.js'

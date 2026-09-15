@@ -4,7 +4,7 @@
 // as a list, and Windows-authored \r demoting lists to paragraphs.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderMarkdown } from '../src/markdown.js'
+import { renderMarkdown } from '../src/canvas/markdown.js'
 
 const md = input => renderMarkdown(input)
 

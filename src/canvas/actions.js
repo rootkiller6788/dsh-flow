@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 import { state, app, api, post, dshRpc, escapeHtml, rememberBranchAnchor, deferCanvasRefresh, turnPositions, clusterPositions, persistQuickPhrases, persistCollapsedCards, MAX_QUICK_PHRASES, MAX_QUICK_PHRASE_LENGTH } from './core.js'
 import { render, camera, focusActiveNode, setError, openInspector, closeInspector } from './view.js'
 import { refreshSummaries, refreshProjection, draftPlacement, conversationCards, conversationGraphView, latestMessage } from './session.js'

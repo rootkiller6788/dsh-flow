@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 import { state, api, turnPositions, canReplaceView, persistCollapsedCards, TURN_W, TURN_H, TURN_STEP_X } from './core.js'
 import { relayOf } from './relay.js'
 import { render } from './view.js'

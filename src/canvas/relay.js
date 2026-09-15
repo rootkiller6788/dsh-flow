@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 // Agent-injected message parsing (mirror of index.js' projection rules).
 
 

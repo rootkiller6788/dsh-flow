@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 // Foundation: shared state, geometry constants, localStorage stores, host bridge.
 import { escapeHtml } from './html.js'
 const app = document.querySelector('#app')

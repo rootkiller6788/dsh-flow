@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 import { state, app, Engine, escapeHtml, selectorValue, whoVars, whoSolid, turnPositions, clusterPositions, canReplaceView, deferCanvasRefresh, VIEWPORT_MARGIN, TURN_W, TURN_H, MAX_QUICK_PHRASE_LENGTH } from './core.js'
 import { renderMarkdown } from './markdown.js'
 import { relayOf } from './relay.js'

@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 // Entry: host bridge, live replies, polls, boot.
 import { state, app, post, escapeHtml, canReplaceView, settleRpc } from './core.js'
 import { render, focusActiveNode, setError } from './view.js'

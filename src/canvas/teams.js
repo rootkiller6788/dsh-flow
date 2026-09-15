@@ -1,4 +1,4 @@
-// dsh-flow canvas — see src/canvas.js for the module map.
+// dsh-flow canvas — see src/canvas/canvas.js for the module map.
 import { state, api, clusterPositions, canReplaceView, CLUSTER_GAP, TEAMS_URL, TURN_W, TURN_H, TEAM_W, TEAM_H, MEMBER_W, MEMBER_H, MEMBER_GAP, TASK_W, TASK_H, TASK_GAP_X, TASK_GAP_Y } from './core.js'
 import { render } from './view.js'
 

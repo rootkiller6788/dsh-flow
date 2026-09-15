@@ -154,6 +154,36 @@ export function stagedPlanHtml(team) {
   return `<form class="process plan-editor" data-form="plan-edit" data-team="${teamId}"><div class="quality-line"><span class="quality-title">待审计划</span><span class="quality-count">可编辑</span></div>${memberGroup}<div class="plan-add"><input name="memberName" placeholder="新成员名字" aria-label="新成员名字"><input name="memberRole" placeholder="角色（可选）" aria-label="新成员角色"><button type="submit" name="intent" value="addMember">添加成员</button></div>${taskGroup}<div class="plan-add"><input name="taskSubject" placeholder="新任务标题" aria-label="新任务标题"><button type="submit" name="intent" value="addTask">添加任务</button></div><div class="plan-foot"><button type="submit" class="primary" name="intent" value="approve">批准并启动</button></div></form>`
 }
 
+const WARNING_KIND = {
+  log: '事件日志',
+  mailbox: '收件箱',
+  team: '团队记录',
+}
+
+/**
+ * The import report: which lines could not be read, and why.
+ *
+ * Shown rather than logged alone. A damaged line means part of the record is
+ * missing — a message nobody will ever read, or an event the team did that its
+ * history does not contain — and the reader looking at the team is the only one
+ * who can act on it. A host console nobody is watching is not a report.
+ *
+ * Every line is listed, not counted: the line number is what makes a damaged
+ * file fixable, and a count throws away the only part a reader can use.
+ */
+export function warningsHtml(warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return ''
+  const rows = warnings.map(entry => {
+    const kind = WARNING_KIND[entry.kind] ?? String(entry.kind ?? '')
+    const where = entry.member === undefined || entry.member === '' ? '' : ` · ${escapeHtml(entry.member)}`
+    // A finding against a whole record has no line, and inventing one would send
+    // the reader looking for a line that is not the problem.
+    const line = Number.isInteger(entry.line) ? `<span class="warning-line">第 ${escapeHtml(entry.line)} 行</span>` : ''
+    return `<div class="warning-row"><span class="warning-where">${escapeHtml(kind)}${where}</span>${line}<span class="warning-why">${escapeHtml(entry.reason ?? '')}</span></div>`
+  }).join('')
+  return `<section class="process"><div class="quality-line"><span class="quality-title">数据损坏</span><span class="chip chip--state-failed">${warnings.length} 处</span></div><div class="quality-summary">这些行读不出来，已被跳过。上面看到的内容里，缺的就是它们。</div>${rows}</section>`
+}
+
 /**
  * One task's attempt timeline.
  *

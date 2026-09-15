@@ -37,17 +37,24 @@ async function pollTeams() {
   // will render once and then never update, which looks like a stale panel
   // rather than a missing entry. So every field added to the snapshot that the
   // canvas draws belongs here in the same change.
-  const signature = JSON.stringify(snapshots.map(team => [
-    team.teamId, team.name, team.phase, team.halted, team.archived,
-    team.loop?.state, team.loop?.summary, team.delivery?.ok, team.delivery?.blockers, team.coverage,
-    (team.members ?? []).map(member => [
-      member.name, member.status, member.activity, member.done, member.total, member.unread, member.currentTask,
+  const signature = JSON.stringify([
+    snapshots.map(team => [
+      team.teamId, team.name, team.phase, team.halted, team.archived,
+      team.loop?.state, team.loop?.summary, team.delivery?.ok, team.delivery?.blockers, team.coverage,
+      team.warnings,
+      (team.members ?? []).map(member => [
+        member.name, member.status, member.activity, member.done, member.total, member.unread, member.currentTask,
+      ]),
+      (team.tasks ?? []).map(task => [task.id, task.state, task.assignee, task.depth]),
     ]),
-    (team.tasks ?? []).map(task => [task.id, task.state, task.assignee, task.depth]),
-  ]))
+    // Once, not per team: the import report is deployment-wide, and a team that
+    // never reaches the canvas has to be able to move this on its own.
+    body?.damaged,
+  ])
   if (signature === state.teamsSignature) return
   state.teamsSignature = signature
   state.teams = snapshots
+  state.damaged = body?.damaged ?? { total: 0, teams: [] }
   if (canReplaceView()) render()
 }
 
@@ -133,6 +140,7 @@ function buildTeamHierarchy(team, threadCards, allCards) {
     name: team.name ?? teamId, phase: team.phase, halted: team.halted === true,
     memberCount: members.length, taskCount: taskList.length,
     taskDone: taskList.filter(task => task.state === 'completed').length,
+    warningCount: (team.warnings ?? []).length,
   })
 
   const cardPositions = new Map()
@@ -209,6 +217,7 @@ function buildFallbackCluster(team, origin) {
     name: team.name ?? teamId, phase: team.phase, halted: team.halted === true,
     memberCount: members.length, taskCount: taskList.length,
     taskDone: taskList.filter(task => task.state === 'completed').length,
+    warningCount: (team.warnings ?? []).length,
   })
   const memberNodesByKey = new Map()
   ;[{ name: captainName, laneName: 'captain', isCaptain: true, member: null }, ...members.map(member => ({ name: member.name, laneName: member.name, isCaptain: false, member }))].forEach((lane, index) => {

@@ -12,6 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installFlowKernel } from '../kernel.js'
@@ -454,6 +455,29 @@ test('status reports the team, and a captain\'s call is also a dispatch pass', a
   assert.match(text, /→ 建模手/)
   assert.match(text, /t2 \[pending\].*deps: t1/)
   assert.equal((await readBack(kernel, created.teamId)).tasks[0].status, 'claimed', 'and it did not disturb the run')
+})
+
+test('a damaged event log leaves a record rather than vanishing', async t => {
+  // It *was* dropped. The store takes an `onMalformedLine` handler and this mount
+  // only supplied one when a deployment happened to configure it, so by default a
+  // line that could not be read disappeared without a word — the silent skip
+  // `AGENTS.md:113` refuses. It is also the worse of the two readers: a damaged
+  // mailbox loses mail, a damaged log loses what the team did.
+  const { tool, captain, kernel, stateDir } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await appendFile(join(stateDir, created.teamId, EVENTS_FILE), '{ not json\n', 'utf8')
+
+  // Reading the team is what parses the log; the report is what the canvas reads.
+  await readBack(kernel, created.teamId)
+  const warnings = kernel.diagnostics.forTeam(created.teamId)
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].kind, 'log')
+  assert.match(warnings[0].reason, /invalid JSON/)
+
+  // And reading it again does not add a second copy — the canvas polls.
+  await readBack(kernel, created.teamId)
+  assert.equal(kernel.diagnostics.forTeam(created.teamId).length, 1)
+  assert.deepEqual(kernel.diagnostics.summary().teams, [{ teamId: created.teamId, count: 1 }])
 })
 
 test('ending the team archives it and stops it being reachable', async t => {

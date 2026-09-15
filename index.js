@@ -1372,18 +1372,39 @@ export function apply(ctx, config) {
       // source since the kernel was mounted — and a mirror of a foreign feed
       // would be a second record of a team, able to disagree with the log.
       if (path === '/dsh-flow/map-api/teams' && req.method === 'GET') {
-        if (kernel === undefined) return sendJson(res, 200, { teams: [] })
-        return sendJson(res, 200, await canvasSnapshot(kernel.sources, {
-          onMalformedLine: (teamId, memberName, line, error) => ctx.logger.warn(
-            `dsh-flow: ${teamId}/${memberName} mailbox line ${line}: ${error.message}`,
-          ),
+        if (kernel === undefined) return sendJson(res, 200, { teams: [], damaged: { total: 0, teams: [] } })
+        const snapshot = await canvasSnapshot(kernel.sources, {
+          // Recorded as well as logged. A damaged mailbox line is lost mail, and
+          // a host console nobody is reading is not where the person looking at
+          // the team finds out — silence is how corruption becomes a mystery.
+          onMalformedLine: (teamId, memberName, line, error) => {
+            ctx.logger.warn(`dsh-flow: ${teamId}/${memberName} mailbox line ${line}: ${error.message}`)
+            kernel.diagnostics.record({ kind: 'mailbox', teamId, member: memberName, line, reason: error.message })
+          },
+          // A team that exists on disk and cannot be drawn. Reported because the
+          // alternative is a directory the reader can see and a canvas that says
+          // nothing about it — and there is no line number to give, which is why
+          // the report has a kind that carries none.
+          onInvalidTeam: (teamId, reason) => {
+            ctx.logger.warn(`dsh-flow: team "${teamId}" cannot be projected: ${reason}`)
+            kernel.diagnostics.record({ kind: 'team', teamId, reason })
+          },
           // What a member is doing *now*, which is the one thing the record
           // cannot answer: it is the runtime's input, not its output, so a
           // member that was mid-task when the plugin unloaded would read
           // `working` forever. A live registry is asked; an absent one is not a
           // failure, which is why a missing agent falls back rather than throws.
           activity: sessionId => ctx.agents?.get?.(sessionId)?.status ?? 'ready',
-        }))
+        })
+        // The warnings ride on the snapshot rather than being fetched separately:
+        // the snapshot is what re-reads those files, so it is also what knows
+        // which of them are damaged, and a second read could disagree with it.
+        const damaged = kernel.diagnostics.summary()
+        return sendJson(res, 200, {
+          ...snapshot,
+          teams: snapshot.teams.map(team => ({ ...team, warnings: kernel.diagnostics.forTeam(team.teamId) })),
+          damaged,
+        })
       }
       return sendJson(res, 404, { error: '接口不存在' })
     } catch (error) {

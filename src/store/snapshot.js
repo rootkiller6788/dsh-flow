@@ -175,6 +175,9 @@ export async function readTaskHistory(service, teamId, taskId) {
  *   damaged line shows up as a diagnostic rather than as silence.
  * @param options.activity - `(sessionId) => string`, forwarded to the team
  *   projection. See `teamSnapshot`.
+ * @param options.onInvalidTeam - `(teamId, reason) => void`, called for a team
+ *   that exists but cannot be projected. Absent leaves it silent, which is why
+ *   the canvas route always supplies one.
  * @returns `{ teams }`, each naming the source it came from.
  */
 export async function canvasSnapshot(registry, options = {}) {
@@ -186,7 +189,14 @@ export async function canvasSnapshot(registry, options = {}) {
     // A source that has no such team answers with nothing rather than with an
     // empty log: `projectTeam` folds a log, and an absent team is not one.
     const team = events === undefined ? undefined : projectTeam(events)?.state
-    if (team === undefined || !isTeamState({ ...team, id: teamId }, teamId)) continue
+    if (team === undefined) continue
+    if (!isTeamState({ ...team, id: teamId }, teamId)) {
+      // A directory that exists and cannot be projected is the worst version of
+      // a silent skip: the reader sees a team on disk and nothing on the canvas,
+      // and nothing anywhere says why. Reported rather than passed over.
+      options.onInvalidTeam?.(teamId, '记录不满足团队状态契约')
+      continue
+    }
 
     const counts = new Map()
     for (const member of team.members) {

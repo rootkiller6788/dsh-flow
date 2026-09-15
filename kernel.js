@@ -28,6 +28,7 @@ import { installTeamCapabilities } from './src/runner/capabilities.js'
 import { deliverToMember, interruptMember, parseMemberLabel, spawnMember, steerCaptainReport, waitForMemberIdle } from './src/runner/member-ops.js'
 import { captainRoute, resolveMemberLlmSelection } from './src/runner/member-llm.js'
 import { installRetiredMemberGuard } from './src/runner/retired-guard.js'
+import { createFlowDiagnostics } from './src/store/diagnostics.js'
 import { createFlowStore } from './src/store/index.js'
 import { createPlanHooks } from './src/config/hooks.js'
 import { createProfileRegistry, describeProfiles } from './src/config/profile-registry.js'
@@ -81,10 +82,19 @@ export function installFlowKernel(ctx, config = {}) {
 
   const retired = createRetiredLedger(stateDir)
   const planHooks = createPlanHooks(profiles)
+  // A damaged line in a team's own event log used to be dropped without a word:
+  // the store takes an `onMalformedLine` handler and this mount never gave it
+  // one unless a deployment happened to configure it. That is precisely the
+  // silent skip `AGENTS.md:113` refuses — parsing must not stop, but nothing may
+  // be quiet either. It is recorded here and read back by the canvas.
+  const diagnostics = createFlowDiagnostics()
   const store = createFlowStore({
     root: stateDir,
     ...config.maxMembers === undefined ? {} : { maxMembers: config.maxMembers },
-    ...config.onMalformedLine === undefined ? {} : { onMalformedLine: config.onMalformedLine },
+    onMalformedLine: (teamId, line, error) => {
+      if (config.onMalformedLine !== undefined) config.onMalformedLine(teamId, line, error)
+      diagnostics.record({ kind: 'log', teamId, line, reason: error.message })
+    },
     hooks: {
       ...planHooks,
       spawnMembers: teamId => spawnTeamMembers(ctx, {
@@ -234,7 +244,7 @@ export function installFlowKernel(ctx, config = {}) {
   // What dsh-flow offers instead is the channel that actually works, and it is
   // the one its own canvas reads: the append-only team log under `<stateDir>`,
   // projected at `GET /dsh-flow/map-api/teams`.
-  return { store, profiles, runner, tools, retired, sources, stateDir, runnerName }
+  return { store, profiles, runner, tools, retired, sources, diagnostics, stateDir, runnerName }
 }
 
 /**

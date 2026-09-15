@@ -3,7 +3,7 @@ import { state, app, Engine, escapeHtml, selectorValue, whoVars, whoSolid, turnP
 import { renderMarkdown } from './markdown.js'
 import { relayOf } from './relay.js'
 import { messagesFor, latestMessage } from './session.js'
-import { attemptTimelineHtml, qualityPanelHtml, stagedPlanHtml, taskStateLabel } from './team-panels.js'
+import { attemptTimelineHtml, qualityPanelHtml, stagedPlanHtml, taskStateLabel, warningsHtml } from './team-panels.js'
 import { memberArtUrl, captainArtUrl, actionArtUrl } from './artwork.js'
 import { edgePathFor, buildScene } from './scene.js'
 
@@ -56,6 +56,24 @@ function refreshEdgesFor(nodeId) {
     if (from === undefined || to === undefined) continue
     path.setAttribute('d', edgePathFor(from.rect, to.rect))
   }
+}
+
+/**
+ * The deployment-wide import report, in the toolbar.
+ *
+ * The per-team findings live on each team, which covers everything the canvas
+ * can draw — and leaves out the one case that matters most: a team whose record
+ * is too damaged to project never becomes a team here at all, so nothing it
+ * carries could be shown. This is where that is still counted.
+ *
+ * A title rather than a click target: the per-team detail is where a reader can
+ * act, and this says only that there is something to go and look at.
+ */
+function damagedChipHtml() {
+  const total = state.damaged?.total ?? 0
+  if (total === 0) return ''
+  const teams = (state.damaged?.teams ?? []).map(entry => `${entry.teamId} ×${entry.count}`).join('、')
+  return `<span class="tool-damaged chip chip--state-failed" title="有读不出来的记录（${escapeHtml(teams)}），逐个团队可看详情">数据损坏 ${total}</span>`
 }
 
 function emptyScene() {
@@ -138,6 +156,10 @@ function turnCardHtml(node) {
 function teamCardHtml(node) {
   const badges = [
     node.halted ? '<span class="chip chip--halted">已停止</span>' : '',
+    // Damage is visible on the card, not only inside the inspector: the reader
+    // who never opens the panel is exactly the one who would otherwise trust a
+    // team whose record is missing pieces.
+    node.warningCount > 0 ? `<span class="chip chip--state-failed" title="有读不出来的行">数据损坏 ${node.warningCount}</span>` : '',
     node.phase === 'running' ? '<span class="chip chip--running">运行中</span>' : '',
     node.phase === 'staged' ? '<span class="chip chip--staged">待确认</span>' : '',
   ].join('')
@@ -437,7 +459,7 @@ function renderTeamInspector(node) {
   // Captain inbox: the member → captain messages still owed to the captain.
   const inbox = Array.isArray(team.captainInbox) ? team.captainInbox.slice(0, 8) : []
   const inboxHtml = inbox.length === 0 ? '' : `<section class="process"><div class="bubble-who">队长收件箱 · 最新 ${inbox.length} 条</div>${inbox.map(item => `<div class="bubble"><img class="bubble-portrait" src="${captainArtUrl()}" alt=""><div style="min-width:0;flex:1"><div class="bubble-who">${escapeHtml(item.from ?? '')}<span class="bubble-route">队长</span></div><div class="bubble-body"><div class="md">${renderMarkdown(item.content ?? '')}</div></div></div></div>`).join('')}</section>`
-  return `<header class="inspector-head"><div><div class="inspector-meta"><span>${node.halted ? '已停止' : node.phase === 'running' ? '运行中' : '待确认'}</span><span>${(team.members ?? []).length} 名成员</span><span>${(team.tasks ?? []).filter(task => task.state === 'completed').length}/${(team.tasks ?? []).length} 任务完成</span></div><h2 class="inspector-title">${escapeHtml(team.name ?? team.teamId)}</h2></div><button class="inspector-close" type="button" data-action="close-inspector" aria-label="关闭详情" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="inspector-scroll"><div class="team-member-list">${members}</div>${tasks === '' ? '' : `<section class="process"><div class="bubble-who">任务依赖</div>${tasks}</section>`}${timeline}${stagedPlanHtml(team)}${qualityPanelHtml(team)}${inboxHtml}</div><footer class="inspector-foot"></footer>`
+  return `<header class="inspector-head"><div><div class="inspector-meta"><span>${node.halted ? '已停止' : node.phase === 'running' ? '运行中' : '待确认'}</span><span>${(team.members ?? []).length} 名成员</span><span>${(team.tasks ?? []).filter(task => task.state === 'completed').length}/${(team.tasks ?? []).length} 任务完成</span></div><h2 class="inspector-title">${escapeHtml(team.name ?? team.teamId)}</h2></div><button class="inspector-close" type="button" data-action="close-inspector" aria-label="关闭详情" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="inspector-scroll"><div class="team-member-list">${members}</div>${tasks === '' ? '' : `<section class="process"><div class="bubble-who">任务依赖</div>${tasks}</section>`}${timeline}${stagedPlanHtml(team)}${qualityPanelHtml(team)}${warningsHtml(team.warnings)}${inboxHtml}</div><footer class="inspector-foot"></footer>`
 }
 
 function renderInspector() {
@@ -470,6 +492,7 @@ function render() {
     <button class="tool-btn" type="button" data-action="zoom-out" aria-label="缩小" title="缩小"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/></svg></button>
     <span class="tool-zoom">${Math.round(camera.zoom * 100)}%</span>
     <button class="tool-btn" type="button" data-action="zoom-in" aria-label="放大" title="放大"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
+    ${damagedChipHtml()}
   </div></header><section class="stage-main">${state.error ? `<div class="error-toast" role="alert"><span>${escapeHtml(state.error)}</span><button data-action="dismiss-error" aria-label="关闭" title="关闭">×</button></div>` : ''}${canvas}<button class="follow-chip" type="button" data-action="follow-selection" hidden aria-label="基于所选内容创建追问" title="基于所选内容追问"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 3.5h10v6.25H7.2L4 12.5V9.75H3Z"/><path d="M8 4.9v3.4M6.3 6.6h3.4"/></svg><span>追问</span></button></section></main>`
 
   const isRegion = node => node.kind === 'teamRegion' || node.kind === 'memberRegion'

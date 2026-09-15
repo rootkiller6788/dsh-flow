@@ -53,6 +53,9 @@ const state = {
   // What this deployment offers, read once at boot: profiles are deployment
   // configuration, so they do not change while the process runs.
   profiles: [],
+  // The import report, at deployment scope. Per-team findings ride on each team;
+  // this is what a team that never reaches the canvas can still be seen through.
+  damaged: { total: 0, teams: [] },
   // One task's attempt history, fetched on demand rather than polled: the team
   // snapshot is read once a second and a history is read only when a reader
   // opens a row. Keyed by `${teamId}:${taskId}` so two open rows cannot collide.

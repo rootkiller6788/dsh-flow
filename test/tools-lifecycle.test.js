@@ -7,6 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { installFlowTools } from '../src/tools/index.js'
+import { FLOW_TOOL_NAMES } from '../src/rules/index.js'
 import { createFakeHost } from './support/fake-host.js'
 
 /** A recording set of tool dependencies. */
@@ -54,7 +55,10 @@ const exec = { signal: new AbortController().signal }
 
 test('every tool is registered with the output declaration the host requires', () => {
   const built = buildTools()
-  assert.deepEqual(built.names, ['flow_create', 'flow_edit_plan', 'flow_approve'])
+  // Asserted against the rules constant rather than a literal list: the names
+  // the role rules deny a member and the names actually registered have to be
+  // the same set, and a copy here would let them drift apart silently.
+  assert.deepEqual(built.names, [...FLOW_TOOL_NAMES])
   for (const definition of built.registered) {
     assert.ok(definition.output, `${definition.name} has no output declaration`)
     assert.deepEqual(Object.keys(definition.output).sort(), ['render', 'schema'])

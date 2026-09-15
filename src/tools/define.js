@@ -91,3 +91,25 @@ export class FlowToolError extends Error {
     this.name = 'FlowToolError'
   }
 }
+
+/**
+ * Run something that may fail, and make its failure read as an instruction.
+ *
+ * The layers below this one — the profile registry, the plan expander — raise
+ * plain errors, because none of them should have to know it is serving a model.
+ * Translating at the tool boundary is what keeps that true while still giving
+ * the model a message it can act on: a profile that does not exist comes back
+ * as the list of profiles that do.
+ *
+ * @param operation - the work to run.
+ * @returns whatever it returned.
+ * @throws a `FlowToolError` carrying the original message.
+ */
+export async function asToolError(operation) {
+  try {
+    return await operation()
+  } catch (error) {
+    if (error instanceof FlowToolError) throw error
+    throw new FlowToolError(error instanceof Error ? error.message : String(error))
+  }
+}

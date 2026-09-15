@@ -125,6 +125,44 @@ export function interruptMember(ctx, options) {
 }
 
 /**
+ * Wait for one member to finish the turn it is in.
+ *
+ * Interrupting is a request; this is how a caller waits for the *effect*. The
+ * distinction matters for reassignment and for archiving a team: revoking a
+ * task's capability is what makes a late update stale, but a member mid-write
+ * still holds the old record, so the caller waits rather than assuming the
+ * interrupt landed.
+ *
+ * A member with no live agent is already as idle as it will ever be, so the
+ * wait resolves at once — the common case is a member that has never been
+ * spawned or has already exited, and blocking on it would hang the caller.
+ *
+ * @param ctx - the plugin context.
+ * @param options.memberId - the member's session id.
+ * @param options.signal - cancellation; its reason becomes the rejection.
+ */
+export async function waitForMemberIdle(ctx, options) {
+  const { memberId, signal } = options
+  if (typeof memberId !== 'string' || memberId === '') return
+  const live = ctx.agents.get(memberId)
+  if (live === undefined || typeof live.whenIdle !== 'function') return
+  if (signal?.aborted === true) throw signal.reason ?? new Error('the wait was cancelled')
+
+  let onAbort
+  try {
+    await Promise.race([
+      live.whenIdle(),
+      new Promise((_resolve, reject) => {
+        onAbort = () => reject(signal.reason ?? new Error('the wait was cancelled'))
+        signal?.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+  } finally {
+    if (onAbort !== undefined) signal.removeEventListener('abort', onAbort)
+  }
+}
+
+/**
  * Hand a member's report to the live captain at its next model step.
  *
  * `steer` submits one later turn; a failure means the captain is not live, and

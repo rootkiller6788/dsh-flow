@@ -28,6 +28,7 @@ export const TEAM_EVENT_TYPES = Object.freeze([
   'member.updated',
   'member.removed',
   'task.created',
+  'task.removed',
   'task.transitioned',
   'task.attempt_started',
   'task.attempt_failed',
@@ -61,6 +62,13 @@ const PAYLOAD_SCHEMA = Object.freeze({
   'member.updated': { required: { id: isText, patch: isRecord }, optional: [] },
   'member.removed': { required: { id: isText }, optional: ['reason'] },
   'task.created': { required: { task: isRecord }, optional: [] },
+  // A task dropped from a plan that has not run. This is the one event that
+  // takes something out of the record, and it is deliberately narrow: a task
+  // that ran is cancelled or failed, never removed, because its attempts are
+  // facts. A member is tombstoned instead of removed because its *name* is an
+  // identity other records still refer to, which a never-run task has not yet
+  // acquired.
+  'task.removed': { required: { id: isText }, optional: ['reason'] },
   'task.transitioned': { required: { id: isText, from: isText, to: isText }, optional: ['at'] },
   'task.attempt_started': { required: { id: isText, attemptId: isText }, optional: ['attempt', 'assignee'] },
   'task.attempt_failed': { required: { id: isText, attemptId: isText, reason: isText }, optional: ['code'] },

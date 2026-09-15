@@ -94,6 +94,9 @@ export function reduceTeamEvent(draft, event) {
       return { ...draft, taskSeq: nextSeq, tasks: [...draft.tasks, task] }
     }
 
+    case 'task.removed':
+      return { ...draft, tasks: draft.tasks.filter(task => task.id !== event.id) }
+
     case 'task.transitioned':
       return {
         ...draft,

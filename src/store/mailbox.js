@@ -52,8 +52,17 @@ export function createMailboxStore(options) {
     }
   }
 
-  const report = (teamId, memberName) => (line, error) => {
-    options.onMalformedLine?.(teamId, memberName, line, error)
+  /**
+   * Where a damaged line gets reported.
+   *
+   * A per-call reporter overrides the store-level one so a diagnostic surface
+   * can show the damage *it* just read without every other reader having to
+   * carry it. The store-level reporter stays the default, because a line nobody
+   * is looking at still has to reach somewhere.
+   */
+  const report = (teamId, memberName, onMalformedLine) => (line, error) => {
+    if (onMalformedLine !== undefined) onMalformedLine(teamId, memberName, line, error)
+    else options.onMalformedLine?.(teamId, memberName, line, error)
   }
 
   /** Rewrite only the selected messages, atomically. */
@@ -69,9 +78,9 @@ export function createMailboxStore(options) {
   }
 
   /** Every message the member has, oldest first. */
-  const readMailbox = async (teamId, memberName) => {
+  const readMailbox = async (teamId, memberName, onMalformedLine) => {
     const raw = await readIfPresent(mailPath(teamId, memberName))
-    return raw === undefined ? [] : parseMailboxLines(raw, report(teamId, memberName))
+    return raw === undefined ? [] : parseMailboxLines(raw, report(teamId, memberName, onMalformedLine))
   }
 
   return {
@@ -84,8 +93,8 @@ export function createMailboxStore(options) {
      * being stored, so a lease that lapsed while nothing was running is simply
      * not seen as held — there is no timer anywhere in this design.
      */
-    async readUnreadMailbox(teamId, memberName) {
-      return unreadMessages(await readMailbox(teamId, memberName), now())
+    async readUnreadMailbox(teamId, memberName, onMalformedLine) {
+      return unreadMessages(await readMailbox(teamId, memberName, onMalformedLine), now())
     },
 
     /**

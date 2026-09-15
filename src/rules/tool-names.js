@@ -11,12 +11,20 @@
 // what that role must not reach. Installing the decision into a live agent is
 // the runner's job.
 
-/** Every model-facing tool this plugin exposes. */
+/**
+ * Every model-facing tool this plugin exposes.
+ *
+ * In the order a captain meets them: make a team, shape its plan, start it,
+ * change who is on it, define the work, hand it out, report on it, talk, and
+ * end it. The order is not cosmetic — it is what the registration order is
+ * checked against, so the list and the registrations cannot disagree.
+ */
 export const FLOW_TOOL_NAMES = Object.freeze([
-  'flow_create', 'flow_approve', 'flow_edit_plan',
-  'flow_add_member', 'flow_remove_member', 'flow_create_task',
-  'flow_reassign_task', 'flow_claim_task', 'flow_update_task',
-  'flow_send_message', 'flow_status', 'flow_resume', 'flow_delete',
+  'flow_create', 'flow_edit_plan', 'flow_approve',
+  'flow_add_member', 'flow_remove_member',
+  'flow_create_task', 'flow_reassign_task', 'flow_claim_task', 'flow_update_task',
+  'flow_send_message', 'flow_status',
+  'flow_resume', 'flow_delete',
 ])
 
 /**

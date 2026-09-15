@@ -84,6 +84,28 @@ export function createFlowStore(options) {
     return store.readTeam(team.id)
   }
 
+  /**
+   * The team a session is acting in, if any.
+   *
+   * Both lookups scan the live teams. That is a directory read per call, which
+   * is honest about what it costs: an index would be a second record of the
+   * same relationship, and the two could disagree after a crash. A team that
+   * has been archived does not appear, which is the point — an ended team is
+   * not one you can keep acting in.
+   */
+  const findTeamBy = predicate => async sessionId => {
+    if (typeof sessionId !== 'string' || sessionId === '') return undefined
+    for (const teamId of await store.listTeamIds()) {
+      const team = await store.readTeam(teamId)
+      if (team !== undefined && predicate(team, sessionId)) return teamId
+    }
+    return undefined
+  }
+  const findTeamByCaptain = findTeamBy((team, sessionId) => team.captainSessionId === sessionId)
+  const findTeamByParticipant = findTeamBy((team, sessionId) => (
+    team.captainSessionId === sessionId || team.members.some(member => member.id === sessionId)
+  ))
+
   /** The service other plugins and the canvas read. */
   const service = {
     listTeamIds: () => store.listTeamIds(),
@@ -98,8 +120,15 @@ export function createFlowStore(options) {
     archiveTeam: teamId => store.archiveTeam(teamId),
     removeTeam: teamId => store.removeTeam(teamId),
     materialize: teamId => store.materialize(teamId),
-    readMailbox: (teamId, memberName) => mail.readMailbox(teamId, memberName),
+    readMailbox: (teamId, memberName, onMalformedLine) => mail.readMailbox(teamId, memberName, onMalformedLine),
+    readUnreadMailbox: (teamId, memberName, onMalformedLine) => mail.readUnreadMailbox(teamId, memberName, onMalformedLine),
+    appendMessage: (teamId, memberName, message) => mail.appendMessage(teamId, memberName, message),
+    claimDelivery: (teamId, memberName, ids) => mail.claimDelivery(teamId, memberName, ids),
+    acknowledgeDelivery: (teamId, memberName, ids) => mail.acknowledgeDelivery(teamId, memberName, ids),
+    releaseDelivery: (teamId, memberName, ids) => mail.releaseDelivery(teamId, memberName, ids),
     listMailboxes: teamId => mail.listMailboxes(teamId),
+    findTeamByCaptain,
+    findTeamByParticipant,
     withTeamLock: (teamId, operation) => store.withTeamLock(teamId, operation),
   }
 
@@ -115,15 +144,8 @@ export function createFlowStore(options) {
     claimDelivery: (teamId, memberName, ids) => mail.claimDelivery(teamId, memberName, ids),
     acknowledgeDelivery: (teamId, memberName, ids) => mail.acknowledgeDelivery(teamId, memberName, ids),
     releaseDelivery: (teamId, memberName, ids) => mail.releaseDelivery(teamId, memberName, ids),
-    async findTeamByParticipant(sessionId) {
-      for (const teamId of await store.listTeamIds()) {
-        const team = await store.readTeam(teamId)
-        if (team === undefined) continue
-        if (team.captainSessionId === sessionId) return teamId
-        if (team.members.some(member => member.id === sessionId)) return teamId
-      }
-      return undefined
-    },
+    findTeamByParticipant,
+    findTeamByCaptain,
   }
 
   /**

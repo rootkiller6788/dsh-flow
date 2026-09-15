@@ -159,6 +159,57 @@ test('a member holding work says so, so the lane shows the task it owns', async 
   assert.equal(team.members.find(member => member.name === 'a').currentTask, '')
 })
 
+// --- what a member is doing right now --------------------------------------
+
+test('a member with no session says so, rather than reading as idle', async t => {
+  // A member with no child session was never started. Falling through to the
+  // recorded-status reading would call it `idle`, which claims members that do
+  // not exist yet are merely resting.
+  //
+  // Staged, because that is the only phase in which a member may have no session
+  // yet — the validator refuses an empty id on a running team, so the state this
+  // branch answers for cannot otherwise be reached.
+  const root = mkdtempSync(join(tmpdir(), 'dsh-flow-snapshot-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { service } = createFlowStore({ root, hooks: inert })
+  await service.createTeam('T')
+  await service.appendEvents('T', [
+    teamEvent('team.created', { name: 'T', captainSessionId: 'sess-cap', phase: 'staged' }, 1000, 0),
+    teamEvent('member.added', { member: { name: 'planned', role: 'engineer' } }, 1001, 1),
+  ])
+
+  const asked = []
+  const snapshot = await canvasSnapshot(createSourceRegistry({ native: service }), {
+    activity: sessionId => { asked.push(sessionId); return 'running' },
+  })
+  const planned = snapshot.teams[0].members.find(member => member.name === 'planned')
+  assert.equal(planned.id, '', 'the member has no child session')
+  assert.equal(planned.activity, 'unspawned')
+  assert.deepEqual(asked, [], 'so the runtime is not even asked about it')
+})
+
+test('a live runtime is asked about every member that has a session', async t => {
+  // The one field the record cannot answer: `status` is the runtime's *input*,
+  // so a member that was mid-task when the plugin unloaded reads `working`
+  // forever. A canvas trusting it would show work that stopped happening.
+  const opened = await open(t)
+  const asked = []
+  const team = await canvasSnapshot(opened.registry, {
+    activity: sessionId => { asked.push(sessionId); return 'running' },
+  }).then(snapshot => snapshot.teams[0])
+
+  assert.deepEqual(asked, ['child-a', 'child-b'])
+  assert.equal(team.members.every(member => member.activity === 'running'), true)
+})
+
+test('with no runtime the recorded status is the answer, and is not invented', async t => {
+  // A deployment that mounted no executor has nothing to ask. Saying so is
+  // better than a fabricated live value nobody can contradict.
+  const opened = await open(t, [teamEvent('member.updated', { id: 'a', patch: { status: 'working' } }, 1010, 10)])
+  const team = await teamOf(opened)
+  assert.equal(team.members.find(member => member.name === 'a').activity, 'working')
+})
+
 test('work the team could hand out is listed, so the queue is visible', async t => {
   // t1 failed, so t2 is blocked behind it and only t3 is actually claimable.
   const team = await teamOf(await open(t))

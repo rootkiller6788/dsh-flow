@@ -38,8 +38,16 @@ function memberView(member, team, options) {
     // one with a runtime renders live — and `activity` is the only field here
     // that a running executor could contradict, which is why it is the one
     // named differently.
+    //
+    // A member with no child session was never started, and no runtime can say
+    // anything about it: asking would return whatever the registry holds for an
+    // empty id, which is nothing. That state is answered here rather than left to
+    // the fallback, because a staged roster reading `idle` would claim members
+    // that do not exist yet are merely resting.
     status: member.status,
-    activity: options.activity?.(member.id) ?? (member.status === 'working' ? 'working' : 'idle'),
+    activity: member.id === ''
+      ? 'unspawned'
+      : options.activity?.(member.id) ?? (member.status === 'working' ? 'working' : 'idle'),
     done,
     total,
     currentTask: owned === undefined ? '' : owned.id,
@@ -56,6 +64,10 @@ function memberView(member, team, options) {
  *   storage layer's business rather than the projection's.
  * @param options.captainInbox - the captain's unread messages, already read.
  * @param options.archived - whether the team has ended.
+ * @param options.activity - `(sessionId) => string`, what the runtime knows a
+ *   member is doing right now. Injected because the runtime is the host's, and
+ *   absent in a deployment with no executor — where the recorded status is the
+ *   best available answer and saying so is better than inventing a live one.
  * @returns the snapshot.
  */
 export function teamSnapshot(team, options = {}) {
@@ -119,6 +131,8 @@ export function teamSnapshot(team, options = {}) {
  * @param registry - the source registry.
  * @param options.onMalformedLine - forwarded to the mailbox readers, so a
  *   damaged line shows up as a diagnostic rather than as silence.
+ * @param options.activity - `(sessionId) => string`, forwarded to the team
+ *   projection. See `teamSnapshot`.
  * @returns `{ teams }`, each naming the source it came from.
  */
 export async function canvasSnapshot(registry, options = {}) {
@@ -144,7 +158,14 @@ export async function canvasSnapshot(registry, options = {}) {
       .map(message => ({ from: message.from, content: message.content, ts: message.ts }))
 
     teams.push({
-      ...teamSnapshot({ ...team, id: teamId }, { unread: name => counts.get(name) ?? 0, captainInbox }),
+      ...teamSnapshot({ ...team, id: teamId }, {
+        unread: name => counts.get(name) ?? 0,
+        captainInbox,
+        // Forwarded, not consumed here: only the projection knows what a member
+        // view is, and a caller that passed a runtime in and silently got the
+        // recorded status back would have no way to tell.
+        activity: options.activity,
+      }),
       source,
       writable: entry.canAppend?.(teamId) === true,
     })

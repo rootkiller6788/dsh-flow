@@ -1309,6 +1309,12 @@ export function apply(ctx, config) {
           onMalformedLine: (teamId, memberName, line, error) => ctx.logger.warn(
             `dsh-flow: ${teamId}/${memberName} mailbox line ${line}: ${error.message}`,
           ),
+          // What a member is doing *now*, which is the one thing the record
+          // cannot answer: it is the runtime's input, not its output, so a
+          // member that was mid-task when the plugin unloaded would read
+          // `working` forever. A live registry is asked; an absent one is not a
+          // failure, which is why a missing agent falls back rather than throws.
+          activity: sessionId => ctx.agents?.get?.(sessionId)?.status ?? 'ready',
         }))
       }
       return sendJson(res, 404, { error: '接口不存在' })

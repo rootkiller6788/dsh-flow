@@ -32,9 +32,16 @@ async function pollTeams() {
   const snapshots = Array.isArray(body?.teams) ? body.teams : []
   // The signature decides whether anything a view reads has changed, so an idle
   // poll costs one render and no DOM work.
+  //
+  // It is an allowlist, and a strict one: a field a view reads but this omits
+  // will render once and then never update, which looks like a stale panel
+  // rather than a missing entry. So every field added to the snapshot that the
+  // canvas draws belongs here in the same change.
   const signature = JSON.stringify(snapshots.map(team => [
     team.teamId, team.name, team.phase, team.halted, team.archived,
-    (team.members ?? []).map(member => [member.name, member.status, member.done, member.total, member.unread, member.currentTask]),
+    (team.members ?? []).map(member => [
+      member.name, member.status, member.activity, member.done, member.total, member.unread, member.currentTask,
+    ]),
     (team.tasks ?? []).map(task => [task.id, task.state, task.assignee, task.depth]),
   ]))
   if (signature === state.teamsSignature) return

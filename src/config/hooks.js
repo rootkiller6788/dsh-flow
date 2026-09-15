@@ -1,6 +1,11 @@
 // The two store hooks that depend on deployment configuration.
 //
-// `createFlowStore` demands four hooks and supplies none of them. Two need only
+// This layer is what a deployment configures, and the adapters that turn that
+// configuration into something the team layer can use. It is not part of the
+// team layer: nothing here stores a team, and the team layer does not know it
+// exists. What it knows is that `createFlowStore` wants four hooks.
+//
+// `createFlowStore` demands those four and supplies none of them. Two need only
 // the profile registry, so they are built here; the other two — spawning and
 // kicking — need the live host, so the plugin entry builds them from the
 // runner. Keeping that split means this module can be tested with a config

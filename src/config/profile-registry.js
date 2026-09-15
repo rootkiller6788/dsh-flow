@@ -6,6 +6,11 @@
 // fields). What the core owns is the profile's *shape*, and the validation here
 // leans on that rather than restating it.
 //
+// It sits in `src/config/` rather than beside the store because a profile is not
+// a team: this layer is *what a deployment offers*, and the team layer is what
+// it has. Reading a misconfigured profile as a storage concern would put the
+// deployment's opinions inside the record that outlives them.
+//
 // The registry is checked once, at mount, and every later lookup is a map read.
 // A misconfigured profile that only failed when a captain happened to pick it
 // would be a configuration error reported to the model.

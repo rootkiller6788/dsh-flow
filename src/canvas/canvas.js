@@ -1,6 +1,6 @@
 // dsh-flow canvas — see src/canvas/canvas.js for the module map.
 // Entry: host bridge, live replies, polls, boot.
-import { state, app, post, escapeHtml, canReplaceView, settleRpc } from './core.js'
+import { state, app, api, post, escapeHtml, canReplaceView, settleRpc } from './core.js'
 import { render, focusActiveNode, setError } from './view.js'
 import { refreshSummaries, refreshProjection, openDshWorkspace, openCurrentWorkspace, revealConversationThread, conversationCards, currentDshThread, currentDshWorkspace, selectedDshWorkspace } from './session.js'
 import { pollTeams } from './teams.js'
@@ -112,6 +112,14 @@ post('flow:request-current')
 // re-weaves a second later.
 void pollTeams().catch(setError)
 void refreshSummaries().catch(setError)
+// Deployment configuration, read once rather than polled: a profile list that is
+// a constant per process would otherwise be re-sent every second. A failure is
+// not reported — the picker simply does not appear, and the canvas works without
+// it, because a profile can always be named by typing the command instead.
+void api('/dsh-flow/map-api/profiles').then(body => {
+  state.profiles = Array.isArray(body?.profiles) ? body.profiles : []
+  if (canReplaceView()) render()
+}).catch(() => {})
 let projectionPolling = false
 async function pollProjection() {
   if (projectionPolling || document.hidden || !canReplaceView()) return

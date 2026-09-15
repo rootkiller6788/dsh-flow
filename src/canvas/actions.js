@@ -21,7 +21,7 @@ function openNewSession() {
   state.inspectorId = null
   state.inspectorOpening = false
   state.quickPhraseEditorOpen = false
-  state.draft = { kind: 'new', text: '', sending: false }
+  state.draft = { kind: 'new', text: '', sending: false, profile: '' }
   state.error = ''
   state.needsCenter = true
   render()
@@ -31,7 +31,7 @@ function openContinue(parent, anchorId = undefined, text = '') {
   if (parent.dshSessionId === null) return setError('该节点没有关联的 DSH 会话')
   state.activeId = parent.id
   state.quickPhraseEditorOpen = false
-  state.draft = { kind: 'continue', parentId: parent.id, anchorId, text, sending: false }
+  state.draft = { kind: 'continue', parentId: parent.id, anchorId, text, sending: false, profile: '' }
   render()
   window.setTimeout(focusDraftInput, 0)
 }
@@ -39,7 +39,7 @@ function openBranch(parent, atSeq = undefined, anchorId = undefined) {
   if (parent.dshSessionId === null) return setError('该节点没有关联的 DSH 会话')
   state.activeId = parent.id
   state.quickPhraseEditorOpen = false
-  state.draft = { kind: 'branch', parentId: parent.id, atSeq, anchorId, text: '', sending: false }
+  state.draft = { kind: 'branch', parentId: parent.id, atSeq, anchorId, text: '', sending: false, profile: '' }
   render()
   window.setTimeout(() => document.querySelector('[data-draft] textarea')?.focus(), 0)
 }
@@ -59,8 +59,16 @@ async function sendMessage(thread, text) {
 }
 async function submitDraft() {
   const draft = state.draft
-  const text = draft?.text.trim()
-  if (draft === null || !text) return
+  if (draft === null) return
+  const goal = draft.text.trim()
+  const profile = draft.profile ?? ''
+  // A chosen profile makes the message a command even with no goal typed: the
+  // directive the command produces asks for one, which is a better answer than
+  // refusing to send what the reader just built.
+  if (goal === '' && profile === '') return
+  // Composed here rather than sent alongside: the host bridge carries a message,
+  // not a team request, and the slash command is how a human says this by hand.
+  const text = profile === '' ? goal : `/dsh-flow --profile ${profile} ${goal}`.trimEnd()
   const branchPosition = draft.kind === 'branch' && state.workspace !== null ? draftPlacement(conversationCards(state.workspace.threads))?.position : undefined
   draft.sending = true
   state.error = ''
@@ -399,6 +407,11 @@ app.addEventListener('click', async event => {
 app.addEventListener('change', event => {
   const quickPhrase = event.target instanceof Element ? event.target.closest('[data-quick-phrase-index]') : null
   if (quickPhrase instanceof HTMLInputElement) updateQuickPhrase(Number(quickPhrase.dataset.quickPhraseIndex), quickPhrase.value)
+  // Kept in the draft rather than read back off the element at send time: the
+  // poll re-renders the document every second, so the element a reader chose on
+  // is not the element that will be there when they press send.
+  const profile = event.target instanceof Element ? event.target.closest('[data-draft-profile]') : null
+  if (profile instanceof HTMLSelectElement && state.draft !== null) state.draft.profile = profile.value
 })
 app.addEventListener('input', event => {
   const input = event.target

@@ -194,12 +194,23 @@ function draftCardHtml(node) {
   const disabled = draft.sending ? 'disabled' : ''
   const title = draft.kind === 'new' ? '新会话' : draft.kind === 'continue' ? '新的追问' : '新的分支'
   const placeholder = draft.kind === 'new' ? '输入第一条消息' : draft.kind === 'continue' ? '输入追问' : '输入这个分支的新问题'
+  // Present only when this deployment configured a profile a command can
+  // address. An option whose name cannot be spelled as `/dsh-flow-…` would fail
+  // after the reader had typed a goal, as an unknown command.
+  //
+  // The choice lives in `state.draft`, not in the element: the poll re-renders
+  // the whole document every second, and a selection held only by the DOM would
+  // be lost between typing and sending.
+  const chosen = draft.profile ?? ''
+  const profileSelect = state.profiles.length === 0
+    ? ''
+    : `<div class="draft-profile"><select data-draft-profile aria-label="团队 profile" ${disabled}><option value="">普通消息</option>${state.profiles.map(profile => `<option value="${escapeHtml(profile.name)}"${profile.name === chosen ? ' selected' : ''}>${escapeHtml(profile.name)}${profile.description === undefined ? '' : ` · ${escapeHtml(profile.description)}`}</option>`).join('')}</select></div>`
   const phrases = draft.kind === 'new' ? '' : state.quickPhraseEditorOpen
     ? `<div class="phrase-editor">${state.quickPhrases.map((phrase, index) => `<div class="phrase-editor-row"><input data-quick-phrase-index="${index}" maxlength="${MAX_QUICK_PHRASE_LENGTH}" value="${escapeHtml(phrase)}" aria-label="快捷词 ${index + 1}" ${disabled}><button type="button" data-action="remove-quick-phrase" data-quick-phrase-index="${index}" title="删除" ${disabled}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></div>`).join('')}<div class="phrase-editor-row"><input maxlength="${MAX_QUICK_PHRASE_LENGTH}" placeholder="添加快捷词" aria-label="添加快捷词" ${disabled}><button class="primary" type="button" data-action="add-quick-phrase" title="添加快捷词" ${disabled}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button></div><button class="phrase-done" type="button" data-action="close-quick-phrase-editor" ${disabled}>完成</button></div></div>`
     : `<div class="phrase-row">${state.quickPhrases.map(phrase => `<button class="phrase" type="button" data-action="insert-quick-phrase" data-quick-phrase="${escapeHtml(phrase)}" ${disabled}>${escapeHtml(phrase)}</button>`).join('')}<button class="phrase phrase-manage" type="button" data-action="open-quick-phrase-editor" title="管理快捷词" ${disabled}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button></div>`
   return `<article class="card card--draft" data-node="draft" data-node-kind="draft" style="left:${node.rect.x}px;top:${node.rect.y}px">
     <div class="draft-title"><span class="card-dot"></span><strong>${title}</strong></div>
-    <form class="draft-form" data-draft>${phrases}<textarea maxlength="4000" placeholder="${placeholder}" ${disabled}>${escapeHtml(draft.text)}</textarea><div class="draft-actions"><button type="button" data-action="cancel-draft" ${disabled} title="取消" aria-label="取消"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button><button class="primary" type="submit" ${disabled} title="发送" aria-label="发送"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/></svg></button></div></form>
+    <form class="draft-form" data-draft>${phrases}${profileSelect}<textarea maxlength="4000" placeholder="${placeholder}" ${disabled}>${escapeHtml(draft.text)}</textarea><div class="draft-actions"><button type="button" data-action="cancel-draft" ${disabled} title="取消" aria-label="取消"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button><button class="primary" type="submit" ${disabled} title="发送" aria-label="发送"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/></svg></button></div></form>
   </article>`
 }
 

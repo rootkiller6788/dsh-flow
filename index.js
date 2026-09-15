@@ -10,6 +10,7 @@ import { installFlowKernel } from './kernel.js'
 import { isTeamId } from './src/rules/index.js'
 import { FlowToolError } from './src/tools/define.js'
 import { applyTeamApproval, applyTeamEdits } from './src/tools/lifecycle.js'
+import { listProfiles } from './src/config/profile-registry.js'
 import { canvasSnapshot, readTaskHistory } from './src/store/snapshot.js'
 
 export const name = 'dsh-flow'
@@ -1294,6 +1295,14 @@ export function apply(ctx, config) {
         const body = await readJson(req)
         return sendJson(res, 200, await store.projection(body?.sessionIds, body?.cursors))
       }
+      // What this deployment offers. Read once by the canvas rather than carried
+      // on the team snapshot: profiles are deployment configuration, so they do
+      // not change while the process runs, and a poll that repeated them once a
+      // second would be repeating a constant.
+      if (path === '/dsh-flow/map-api/profiles' && req.method === 'GET') {
+        return sendJson(res, 200, { profiles: kernel === undefined ? [] : listProfiles(kernel.profiles) })
+      }
+
       // One task's attempt history. A sub-resource rather than a field on the
       // team snapshot: the snapshot is polled every second and this is read only
       // when somebody opens a row.

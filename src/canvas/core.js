@@ -50,6 +50,9 @@ const state = {
   branchAnchors: new Map(), collapsedCardIds: new Set(), quickPhrases: DEFAULT_QUICK_PHRASES, quickPhraseEditorOpen: false,
   mapCardSessionSwitches: new Set(), expandedMessageIds: new Set(),
   teams: [], teamsSignature: '', teamsError: false, teamsLoaded: false,
+  // What this deployment offers, read once at boot: profiles are deployment
+  // configuration, so they do not change while the process runs.
+  profiles: [],
   // One task's attempt history, fetched on demand rather than polled: the team
   // snapshot is read once a second and a history is read only when a reader
   // opens a row. Keyed by `${teamId}:${taskId}` so two open rows cannot collide.

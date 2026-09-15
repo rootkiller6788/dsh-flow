@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installFlowKernel } from '../kernel.js'
 import { EVENTS_FILE } from '../src/store/team-store.js'
+import { listProfiles } from '../src/config/profile-registry.js'
 import { FLOW_TOOL_NAMES } from '../src/rules/index.js'
 
 const CAPTAIN = 'sess-cap'
@@ -224,6 +225,23 @@ test('the executor seam is provided, and which one it is was decided at mount', 
   const manual = mount(t, { runner: 'manual' })
   assert.equal(manual.provided.get('flowRunner').name, 'manual')
   assert.notEqual(manual.provided.get('flowRunner'), executing.provided.get('flowRunner'))
+})
+
+test('the profiles a deployment offers are readable as data', async t => {
+  // What the canvas picker reads. Only the addressable ones: a profile whose
+  // name cannot be spelled as a slash command would be an option that fails
+  // after the reader had already typed a goal.
+  const { kernel } = mount(t, {
+    profiles: {
+      feature: PROFILES.feature,
+      'bug fix': { description: 'not addressable as a command', members: [], tasks: [] },
+    },
+  })
+  const offered = listProfiles(kernel.profiles)
+  assert.deepEqual(offered.map(profile => profile.name), ['feature'])
+  assert.equal(offered[0].description, 'ship a feature end to end')
+  assert.equal(offered[0].members, 2)
+  assert.equal(offered[0].tasks, 2)
 })
 
 test('a manual mount still serves every tool, and simply never executes', async t => {

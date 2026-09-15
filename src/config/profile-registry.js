@@ -14,7 +14,7 @@
 // The registry is checked once, at mount, and every later lookup is a map read.
 // A misconfigured profile that only failed when a captain happened to pick it
 // would be a configuration error reported to the model.
-import { MAX_TEAM_PROFILES, PROFILE_KEYS, PROFILE_PROTOCOL_PROMPT_LIMIT } from '../rules/index.js'
+import { MAX_TEAM_PROFILES, PROFILE_KEYS, PROFILE_PROTOCOL_PROMPT_LIMIT, profileCommandName } from '../rules/index.js'
 
 /** How many members one profile may declare by default. */
 export const DEFAULT_MAX_MEMBERS = 8
@@ -119,4 +119,29 @@ export function describeProfiles(registry) {
       return `- ${profile.name} ${counts}${shown}`
     }),
   ].join('\n')
+}
+
+/**
+ * The configured profiles as data, for a reader that offers a choice.
+ *
+ * Only the ones a slash command can address. A name like `bug fix` — or one in
+ * another script — cannot be spelled as `/dsh-flow-…`, so offering it would give
+ * the reader an option that fails only after they had typed a goal, as an
+ * unknown command rather than as a profile they cannot pick.
+ *
+ * @param registry - from `createProfileRegistry`.
+ * @returns `{ name, description?, members, tasks }` per offerable profile.
+ */
+export function listProfiles(registry) {
+  const listed = []
+  for (const profile of registry.list()) {
+    if (profileCommandName(profile.name) === undefined) continue
+    listed.push({
+      name: profile.name,
+      ...profile.description === undefined ? {} : { description: String(profile.description) },
+      members: Array.isArray(profile.members) ? profile.members.length : 0,
+      tasks: Array.isArray(profile.tasks) ? profile.tasks.length : 0,
+    })
+  }
+  return listed
 }

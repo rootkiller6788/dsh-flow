@@ -213,7 +213,7 @@ export function installTeamScheduler(ctx, options) {
       // new one would read as work starting that never started.
       const restored = ticket.recoveredOwned && ticket.previousStatus !== undefined
       const seq = await Promise.resolve(deps.nextSeq?.(ticket.teamId) ?? 0)
-      await deps.recordEvents?.(ticket.teamId, attemptFailureEvents(task, {
+      await deps.appendEvents?.(ticket.teamId, attemptFailureEvents(task, {
         reason: failure.reason,
         ...failure.code === undefined ? {} : { code: failure.code },
         toStatus: restored ? ticket.previousStatus : 'pending',

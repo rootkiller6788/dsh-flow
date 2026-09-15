@@ -169,15 +169,28 @@ export function teamDiffEvents(before, after, at, seq) {
   const push = (type, payload) => { events.push({ type, at, seq: seq + events.length, ...payload }) }
 
   for (const member of after.members ?? []) {
-    const previous = member.id === undefined || member.id === ''
-      ? before.members.find(candidate => candidate.name === member.name)
-      : before.members.find(candidate => candidate.id === member.id)
+    // Matched by name first, then by id — in two passes rather than one
+    // predicate, because a single pass is order-dependent: a member matched by
+    // the id clause could shadow the one the name clause was looking for, and
+    // the update would be computed against the wrong row.
+    //
+    // Two identities are needed at all because the record the log holds and the
+    // one the caller is holding differ during exactly the change that matters:
+    // a member that has just been given a session id is still filed under its
+    // name, so matching on the new id alone would miss the row and report the
+    // member as newly added.
+    const previous = before.members.find(candidate => candidate.name === member.name)
+      ?? (member.id === undefined || member.id === ''
+        ? undefined
+        : before.members.find(candidate => candidate.id === member.id))
     if (previous === undefined) {
       push('member.added', { member: memberRecord(member) })
       continue
     }
     const patch = changedFields(previous, member, DERIVED_FIELDS)
-    if (patch !== undefined) push('member.updated', { id: memberKey(member), patch })
+    // Addressed by the identity the log already has, for the same reason: an
+    // event naming a row that does not exist yet applies to nothing.
+    if (patch !== undefined) push('member.updated', { id: memberKey(previous), patch })
   }
   // Removal is a tombstone, not a deletion: `member.removed` leaves the member
   // in the projection marked `removed`, because the tasks it touched and the

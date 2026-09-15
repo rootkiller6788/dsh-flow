@@ -63,7 +63,7 @@ export function createFlowStore(options) {
    * than by the caller — a caller that had to know the current length could not
    * compute it correctly from outside the team lock.
    */
-  const recordEvents = (teamId, events) => store.appendEvents(teamId, events)
+  const appendEvents = (teamId, events) => store.appendEvents(teamId, events)
 
   /**
    * Save a team the caller mutated in place.
@@ -114,7 +114,7 @@ export function createFlowStore(options) {
     readTeamEvents: teamId => store.readTeamEvents(teamId),
     readCheckpoint: teamId => store.readCheckpoint(teamId),
     nextSeq: teamId => store.nextSeq(teamId),
-    appendEvents: recordEvents,
+    appendEvents,
     createTeam: teamId => store.createTeam(teamId),
     hasTeam: teamId => store.hasTeam(teamId),
     archiveTeam: teamId => store.archiveTeam(teamId),
@@ -129,14 +129,44 @@ export function createFlowStore(options) {
     listMailboxes: teamId => mail.listMailboxes(teamId),
     findTeamByCaptain,
     findTeamByParticipant,
+    /**
+     * Save a team the caller mutated in place, by reconciling it with the log.
+     *
+     * The caller MUST hold the team lock: this neither takes it nor can take it
+     * — the dispatch paths that reach it are already inside one, and the queue
+     * is not reentrant. Prefer `appendEvents` with events you decided yourself;
+     * this exists for callers that genuinely hold a mutated record.
+     */
+    writeTeam: team => writeTeam(team),
     withTeamLock: (teamId, operation) => store.withTeamLock(teamId, operation),
+
+    /**
+     * The team a session is acting in, or undefined.
+     *
+     * Read by the capability layer, which decides a session's role once and
+     * freezes it — so this is called once per agent, not once per turn.
+     */
+    async teamOf(sessionId) {
+      const teamId = await findTeamByParticipant(sessionId)
+      return teamId === undefined ? undefined : store.readTeam(teamId)
+    },
+
+    /** The captains this deployment owns, for scoping a teardown. */
+    async captainSessionIds() {
+      const ids = []
+      for (const teamId of await store.listTeamIds()) {
+        const team = await store.readTeam(teamId)
+        if (team !== undefined) ids.push(team.captainSessionId)
+      }
+      return ids
+    },
   }
 
   /** What the dispatch loop needs. */
   const runnerDeps = {
     readTeam: service.readTeam,
     writeTeam,
-    recordEvents,
+    appendEvents,
     nextSeq: service.nextSeq,
     withTeamLock: service.withTeamLock,
     beginAttempt: (task, assignee) => beginTaskAttempt(task, assignee, { attemptId: randomUUID(), now: Date.now() }),
@@ -146,6 +176,9 @@ export function createFlowStore(options) {
     releaseDelivery: (teamId, memberName, ids) => mail.releaseDelivery(teamId, memberName, ids),
     findTeamByParticipant,
     findTeamByCaptain,
+    archiveTeam: teamId => store.archiveTeam(teamId),
+    removeTeam: teamId => store.removeTeam(teamId),
+    createTeam: teamId => store.createTeam(teamId),
   }
 
   /**

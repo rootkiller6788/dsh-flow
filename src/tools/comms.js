@@ -82,7 +82,7 @@ export function sendMessageTool(deps, options = {}) {
       // Delivery is attempted after the message is durable, and a failure only
       // downgrades it. A captain that is not live is the ordinary case rather
       // than an error: that is what the mailbox is for.
-      const captain = options.liveCaptain?.()
+      const captain = await options.liveCaptain?.(sent.teamId)
       let delivered = 'mailbox'
       if (sent.to === CAPTAIN_KEY) {
         if (captain !== undefined && located.caller.kind === 'member') {

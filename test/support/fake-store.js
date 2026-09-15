@@ -47,7 +47,7 @@ export function createFakeStore(initial) {
       uuid += 1
       return beginTaskAttempt(task, assignee, { attemptId: `att-${uuid}`, now: 1000 + uuid })
     },
-    recordEvents(teamId, batch) { for (const event of batch) events.push({ teamId, ...event }) },
+    appendEvents(teamId, batch) { for (const event of batch) events.push({ teamId, ...event }) },
     nextSeq() { return seq++ },
   }
 }

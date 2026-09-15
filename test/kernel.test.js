@@ -1,0 +1,353 @@
+// The kernel, mounted and driven the way a captain would drive it.
+//
+// Everything else in the suite tests one layer against a double. This test is
+// where they meet: the real store on a real filesystem, the real profile
+// registry, the real plan expander, the real scheduler and the real tool
+// objects — mounted through `installFlowKernel` exactly as the plugin entry
+// mounts them, and then called through the model-facing tools.
+//
+// The host is faked, because there is no harness in a unit test. What that
+// means is that this proves every *decision* and every *write*; it cannot prove
+// the host honours what it is asked for.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { installFlowKernel } from '../kernel.js'
+import { EVENTS_FILE } from '../src/store/team-store.js'
+import { FLOW_TOOL_NAMES } from '../src/rules/index.js'
+
+const CAPTAIN = 'sess-cap'
+
+/**
+ * A live agent, with the agent-scoped context the host gives every real one.
+ *
+ * The capability layer reaches agents through `agent.ctx` rather than through
+ * the plugin's own `ctx` — a member's tool restrictions are installed on the
+ * member, not on the plugin — so a fake without it is a fake the kernel cannot
+ * run against at all.
+ */
+function fakeAgent(id, options = {}) {
+  const restricted = []
+  return {
+    id,
+    status: options.status ?? 'idle',
+    // The captain's own route, which a member inherits when its profile names
+    // no provider or model. Without it there is nothing to inherit and no
+    // member can be routed at all.
+    session: {
+      // The durable label the member was created with. It is what identifies a
+      // member to the capability layer, which has to decide synchronously.
+      header: { cwd: options.cwd ?? process.cwd(), ...options.label === undefined ? {} : { label: options.label } },
+      requestHeader: () => ({ config: { provider: 'deepseek', model: 'deepseek-v4-pro' } }),
+    },
+    options: { provider: 'deepseek', model: 'deepseek-v4-pro' },
+    ctx: {
+      tools: { restrict: request => { restricted.push(request); return () => {} } },
+      effect: execute => execute(),
+    },
+    restricted,
+  }
+}
+
+/** A host that can execute: a subagent runtime that records what it is asked. */
+function fakeHost(options = {}) {
+  const agents = new Map([[CAPTAIN, fakeAgent(CAPTAIN, options)]])
+  const calls = { spawned: [], delivered: [], interrupted: [], kicked: [], steered: [], restricted: [], warnings: [] }
+  const listeners = new Map()
+  let children = 0
+
+  const ctx = {
+    logger: { warn: message => { calls.warnings.push(message) }, info: () => {}, error: () => {} },
+    agents: {
+      get: id => agents.get(id),
+      list: () => [...agents.values()],
+    },
+    llm: {
+      async resolveCallConfig(route) {
+        return { provider: route.provider ?? 'deepseek', model: route.model ?? 'deepseek-v4-pro' }
+      },
+    },
+    subagents: {
+      async startContinuable(spec) {
+        children += 1
+        const childId = `child-${children}`
+        calls.spawned.push({ childId, label: spec.label })
+        agents.set(childId, fakeAgent(childId, { label: spec.label }))
+        return { childId, messageId: `msg-${children}` }
+      },
+      // Delivery starts the member's turn, and a member that is in a turn is
+      // not idle. Modelling that is what the scheduler's availability check
+      // reads: without it every kick would treat a member that is mid-task as
+      // free, recover its attempt, and mint a new capability underneath it.
+      async followup(parent, childId, content) {
+        calls.delivered.push({ childId, text: content[0].text })
+        const child = agents.get(childId)
+        if (child !== undefined) child.status = 'running'
+        return `msg-${calls.delivered.length}`
+      },
+      interrupt(childId, authority) { calls.interrupted.push({ childId, authority }) },
+    },
+    systemPrompt: { section: definition => calls.sections?.push?.(definition) },
+    tools: { register: definition => { calls.registered = [...(calls.registered ?? []), definition.name]; return () => {} } },
+    on(event, handler) { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(handler) },
+    effect(execute) { const disposer = execute(); return disposer },
+  }
+  return {
+    ctx,
+    calls,
+    agents,
+    /** Deliver a host event to every handler registered for it. */
+    emit(event, payload) {
+      for (const handler of listeners.get(event) ?? []) handler(payload)
+    },
+    /** The host's own idle report: a member that finished its turn. */
+    goIdle(sessionId) {
+      const agent = agents.get(sessionId)
+      if (agent !== undefined) agent.status = 'idle'
+    },
+  }
+}
+
+/** A team profile, as a deployment would configure one. */
+const PROFILES = {
+  feature: {
+    description: 'ship a feature end to end',
+    members: [{ name: '建模手', role: 'scientist' }, { name: '程序员', role: 'engineer' }],
+    tasks: [
+      { id: 'spec', subject: 'pin the spec', assignee: '建模手' },
+      { id: 'build', subject: 'build it', dependencies: ['spec'], assignee: '程序员' },
+    ],
+    reviewPolicy: { requirementsMinRounds: 1, requirementsMaxRounds: 4, codeMaxRounds: 3, maxRepairAttempts: 2 },
+  },
+}
+
+function mount(t, config = {}) {
+  const stateDir = mkdtempSync(join(tmpdir(), 'dsh-flow-kernel-'))
+  t.after(() => rmSync(stateDir, { recursive: true, force: true }))
+  const host = fakeHost()
+  const registered = []
+  host.ctx.tools.register = definition => { registered.push(definition); return () => {} }
+  const kernel = installFlowKernel(host.ctx, { stateDir, profiles: PROFILES, ...config })
+  const tool = name => registered.find(definition => definition.name === name)
+  const captain = { agent: { id: CAPTAIN } }
+  return { ...host, kernel, registered, tool, captain, stateDir }
+}
+
+/** The team record as a fresh reader sees it, proving the log is the source. */
+const readBack = (kernel, teamId) => kernel.store.service.readTeam(teamId)
+const logOf = (kernel, teamId) => kernel.store.service.readTeamEvents(teamId)
+
+test('mounting registers every declared tool and no others', async t => {
+  const { registered } = mount(t)
+  // The set the role rules deny a member and the set actually registered have
+  // to be the same, or a member keeps a captain's tool with nothing refusing it.
+  assert.deepEqual(registered.map(definition => definition.name), [...FLOW_TOOL_NAMES])
+})
+
+test('a manual mount still serves every tool, and simply never executes', async t => {
+  const { tool, captain, calls, kernel } = mount(t, { runner: 'manual' })
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+  // No error, no members, and the plan is still there to read.
+  assert.deepEqual(calls.spawned, [])
+  assert.equal((await readBack(kernel, created.teamId)).phase, 'running')
+})
+
+test('an unknown runner is refused at mount, not at first use', async t => {
+  // A plugin that loads and then fails the first time a model calls a tool is
+  // a plugin whose failure gets attributed to the model.
+  const stateDir = mkdtempSync(join(tmpdir(), 'dsh-flow-kernel-'))
+  t.after(() => rmSync(stateDir, { recursive: true, force: true }))
+  const { ctx } = fakeHost()
+  assert.throws(() => installFlowKernel(ctx, { stateDir, runner: 'whatever' }), /unknown dsh-flow runner/)
+})
+
+test('an unknown profile names the profiles that do exist', async t => {
+  // A captain that asked for the wrong one needs to see the right ones.
+  const { tool, captain } = mount(t)
+  await assert.rejects(
+    tool('flow_create').execute({ goal: 'x', profile: 'nope' }, captain),
+    /unknown dsh-flow profile "nope" — configured profiles: feature/,
+  )
+})
+
+test('a profile becomes a team, and its plan is what the profile described', async t => {
+  const { tool, captain, kernel } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+
+  assert.equal(created.phase, 'staged', 'nothing runs until the plan is approved')
+  assert.equal(created.members, 2)
+  assert.equal(created.tasks, 2)
+  const team = await readBack(kernel, created.teamId)
+  assert.deepEqual(team.members.map(member => member.name), ['建模手', '程序员'])
+  assert.equal(team.members.every(member => member.id === ''), true, 'a staged plan has no children yet')
+  assert.deepEqual(team.tasks.map(task => task.id), ['t1', 't2'])
+  assert.deepEqual(team.tasks[1].dependencies, ['t1'], 'the seed order is the dependency order')
+})
+
+test('approving spawns the roster and dispatches the first task', async t => {
+  const { tool, captain, calls, kernel } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  const approved = await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  assert.equal(approved.phase, 'running')
+  assert.equal(approved.spawned, 2)
+  assert.deepEqual(calls.spawned.map(entry => entry.label), [
+    `dsh-flow:${created.teamId}/建模手`, `dsh-flow:${created.teamId}/程序员`,
+  ])
+
+  const team = await readBack(kernel, created.teamId)
+  assert.deepEqual(team.members.map(member => member.id), ['child-1', 'child-2'], 'the ids are in the record')
+
+  // t2 depends on t1, so exactly one task can start, and it went to the member
+  // the plan named.
+  assert.equal(team.tasks[0].status, 'claimed')
+  assert.equal(team.tasks[0].assignee, '建模手')
+  assert.equal(team.tasks[1].status, 'pending')
+  assert.equal(calls.delivered.length, 1)
+  assert.match(calls.delivered[0].text, /Task: t1/)
+  assert.match(calls.delivered[0].text, new RegExp(`attempt_id=${team.tasks[0].attemptId}`))
+})
+
+test('the whole run survives being read by a second kernel over the same directory', async t => {
+  // The point of the log: what happened is on disk, not in this process.
+  const { tool, captain, kernel, stateDir } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const { ctx, calls } = fakeHost()
+  const reopened = installFlowKernel(ctx, { stateDir, profiles: PROFILES, runner: 'manual' })
+  assert.deepEqual(await reopened.store.service.readTeam(created.teamId), await readBack(kernel, created.teamId))
+  assert.deepEqual(calls.spawned ?? [], [])
+  assert.match(readFileSync(join(stateDir, created.teamId, EVENTS_FILE), 'utf8'), /"type":"task\.attempt_started"/)
+})
+
+test('a member completes its work, and the dependency unblocks the next task', async t => {
+  const { tool, captain, calls, kernel, stateDir } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const member = { agent: { id: 'child-1' } }
+  const claimed = await tool('flow_claim_task').execute({ teamId: created.teamId, task_id: 't1' }, member)
+  // Claimed → in_progress → completed. The middle step is the state machine's,
+  // not a formality: a task that is finished without ever being reported as
+  // started is a task whose completion nobody could have observed coming.
+  const started = await tool('flow_update_task').execute({
+    teamId: created.teamId, task_id: 't1', status: 'in_progress', attempt_id: claimed.attempt_id,
+  }, member)
+  assert.equal(started.status, 'in_progress')
+  const done = await tool('flow_update_task').execute({
+    teamId: created.teamId, task_id: 't1', status: 'completed',
+    attempt_id: claimed.attempt_id, output: 'spec pinned',
+  }, member)
+  assert.equal(done.status, 'completed')
+
+  // Completing t1 unblocks t2, and the kick that follows the update is what
+  // hands it out — the captain does not have to notice.
+  const team = await readBack(kernel, created.teamId)
+  assert.equal(team.tasks[1].status, 'claimed')
+  assert.equal(team.tasks[1].assignee, '程序员')
+  assert.equal(calls.delivered.length, 2, 'and the second member was woken with it')
+
+  // A third reader sees the same thing, which is what makes the log the record.
+  const { ctx } = fakeHost()
+  const reopened = installFlowKernel(ctx, { stateDir, profiles: PROFILES, runner: 'manual' })
+  assert.deepEqual((await reopened.store.service.readTeam(created.teamId)).tasks[1].status, 'claimed')
+})
+
+test('the same progress delivered twice is not recorded twice', async t => {
+  // A member that re-sends after a turn boundary must not append a second
+  // completion, or the log would say the work finished twice.
+  const { tool, captain, kernel } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const member = { agent: { id: 'child-1' } }
+  const claimed = await tool('flow_claim_task').execute({ teamId: created.teamId, task_id: 't1' }, member)
+  const attempt_id = claimed.attempt_id
+  await tool('flow_update_task').execute({ teamId: created.teamId, task_id: 't1', status: 'in_progress', attempt_id }, member)
+  await tool('flow_update_task').execute({ teamId: created.teamId, task_id: 't1', status: 'completed', attempt_id, output: 'done' }, member)
+  const settled = (await logOf(kernel, created.teamId)).length
+  await tool('flow_update_task').execute({ teamId: created.teamId, task_id: 't1', status: 'completed', attempt_id, output: 'done' }, member)
+  assert.equal((await logOf(kernel, created.teamId)).length, settled, 'a terminal task is immutable')
+})
+
+test('status reports the team, and a captain\'s call is also a dispatch pass', async t => {
+  const { tool, captain, kernel } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const statusTool = tool('flow_status')
+  const snapshot = await statusTool.execute({ teamId: created.teamId }, captain)
+  const text = statusTool.output.render({}, snapshot)[0].text
+  // The display name is the goal as given; the *id* is the sanitized form, and
+  // the two are deliberately different things.
+  assert.match(text, /Team "ship a feature" — ship a feature/)
+  assert.match(text, /建模手 \[scientist\]/)
+  assert.match(text, /t1 \[claimed\]/)
+  assert.match(text, /→ 建模手/)
+  assert.match(text, /t2 \[pending\].*deps: t1/)
+  assert.equal((await readBack(kernel, created.teamId)).tasks[0].status, 'claimed', 'and it did not disturb the run')
+})
+
+test('ending the team archives it and stops it being reachable', async t => {
+  const { tool, captain, kernel, stateDir } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  assert.deepEqual(
+    await tool('flow_delete').execute({ teamId: created.teamId }, captain),
+    { deleted: true, team_name: 'ship a feature' },
+  )
+  assert.equal(await readBack(kernel, created.teamId), undefined, 'an ended team is not one you can keep acting in')
+  assert.equal(existsSync(join(stateDir, 'archive', created.teamId, EVENTS_FILE)), true, 'but its history is kept')
+
+  // And the retired member cannot be resumed: its session still exists in the
+  // host, so the deny-list is the only thing that still knows.
+  assert.equal(await kernel.retired.has('child-1'), true)
+  await assert.rejects(
+    tool('flow_status').execute({ teamId: created.teamId }, { agent: { id: 'child-1' } }),
+    /do not lead or belong to any active team/,
+  )
+})
+
+test('a member is refused the tools that shape the team', async t => {
+  // Two mechanisms, and they cover different things. The identity check inside
+  // a tool needs a team to check against, so it protects everything that acts
+  // *on* a team; `flow_create` makes a new one and so has nothing to check,
+  // which is exactly why the capability restriction exists as well.
+  const { tool, captain, agents, emit } = mount(t)
+  const created = await tool('flow_create').execute({ goal: 'ship a feature', profile: 'feature' }, captain)
+  await tool('flow_approve').execute({ teamId: created.teamId }, captain)
+
+  const member = { agent: { id: 'child-1' } }
+  await assert.rejects(tool('flow_delete').execute({ teamId: created.teamId }, member), /not leading any team/)
+  await assert.rejects(tool('flow_add_member').execute({ teamId: created.teamId, name: 'x' }, member), /not leading any team/)
+  await assert.rejects(
+    tool('flow_reassign_task').execute({ teamId: created.teamId, task_id: 't1', assignee: 'captain' }, member),
+    /not leading any team/,
+  )
+
+  // And a stranger sees nothing at all.
+  await assert.rejects(tool('flow_status').execute({ teamId: created.teamId }, { agent: { id: 'nobody' } }), /do not lead or belong/)
+
+  // The capability path, which is what covers `flow_create` — a tool that
+  // cannot check a team because it makes one. The member is handed its deny
+  // list when its session starts, so the tool is not refused; it is absent.
+  const started = agents.get('child-1')
+  started.restricted.length = 0
+  emit('agent/session-start', { agent: started })
+  assert.equal(started.restricted.length, 1, 'the member was restricted at session start')
+  assert.equal(started.restricted[0].deny.includes('flow_create'), true)
+  assert.equal(started.restricted[0].deny.includes('flow_delete'), true)
+  assert.equal(started.restricted[0].deny.includes('flow_claim_task'), false, 'a member keeps its own work')
+  assert.equal(started.restricted[0].deny.includes('flow_status'), false)
+
+  // And the captain is not restricted at all.
+  const captainAgent = agents.get(CAPTAIN)
+  captainAgent.restricted.length = 0
+  emit('agent/session-start', { agent: captainAgent })
+  assert.deepEqual(captainAgent.restricted, [])
+})

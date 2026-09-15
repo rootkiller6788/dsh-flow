@@ -100,6 +100,27 @@ test('adding a member is its own fact', () => {
   assert.deepEqual(added[0].member, { name: 'c', role: 'engineer' }, 'the projection owns joinedAt and status')
 })
 
+test('giving a member a session id addresses the row by the name it still has', () => {
+  // The id being assigned is what the update carries, but the row it applies to
+  // is still filed under the name. Keying the event on the new id would name no
+  // row, and the assignment would be recorded and then not happen.
+  const events = reconcile(running(), team => { team.members[0].id = 'child-new' })
+  assert.deepEqual(events, [{
+    type: 'member.updated', at: 2000, seq: 99, id: 'child-a', patch: { id: 'child-new' },
+  }])
+})
+
+test('a member is matched by name even when another already holds that id', () => {
+  // Matching in one pass would let the earlier member shadow the later one, and
+  // the update would be computed against the wrong row. Session ids are the
+  // host's to keep unique, so this is about not depending on that.
+  const state = applyEvents(running(), [
+    teamEvent('member.updated', { id: 'child-a', patch: { id: 'shared' } }, 1500, 6),
+  ])
+  const events = reconcile(state, team => { team.members[1].id = 'shared' })
+  assert.deepEqual(events, [{ type: 'member.updated', at: 2000, seq: 99, id: 'child-b', patch: { id: 'shared' } }])
+})
+
 test('deleting a member is refused, because removal is a tombstone', () => {
   // The member stays in the record marked `removed` — the tasks it touched and
   // the mail it received still name it. A caller that spliced it out is asking

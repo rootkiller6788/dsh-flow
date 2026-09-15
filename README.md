@@ -96,28 +96,50 @@ agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【
 
 ## 架构
 
+单包、零运行时依赖、无构建。边界由目录表达，由 `pnpm run build` **逐层断言** ——
+一条没有断言的边界会随时间消失，剩下的只是一个碰巧这么放的目录。
+
 ```
 dsh-flow (纯 JS，无运行时依赖)
-├── index.js            # 宿主侧：WorkspaceStore + 会话事件投影 + 信封解析 + 团队快照存储 + 路由
-├── client.js           # 客户端：一个 conversation.view 标签（内嵌一个 iframe）+ 主题跟随 + 会话动作中继
-├── engine.js           # 画布引擎：相机 / 手势 / 视口裁剪 / 连线几何 / 拖拽绑定（与业务无关，可复用）
+├── src/
+│   ├── rules/          # 纯核：K1–K14 + 事件协议 + 投影 + 对账（library，无 ctx）
+│   ├── store/          # 团队注册表 + append-only 日志 + 收件箱 + 快照投影
+│   │                   #   → ctx.flowTeams（core）
+│   ├── sources/        # 团队来源注册表：本部署的日志 / 导入的 .agent-teams（只读）
+│   │                   #   → ctx.flowTeamSources（seam，注册表形态）
+│   ├── runner/         # 执行 seam：interface.js 定义它，manual / subagents 两个实现
+│   │                   #   → ctx.flowRunner（seam，组合期二选一）
+│   ├── tools/          # 13 个 flow_* 工具
+│   ├── config/         # 部署配置：profile 表 + 两个把配置变成事件的 hook
+│   └── canvas/         # 统一画布页面（浏览器侧，唯一会被 HTTP 服务的一层）
+│       ├── canvas.js   #   入口：宿主桥、实时回复、轮询、启动
+│       ├── core.js     #   共享状态、几何常量、localStorage、宿主桥接、成员配色
+│       ├── markdown.js #   Markdown 渲染（含 ■ 分节规范化）
+│       ├── relay.js    #   智能体信封解析（中继/成员消息/子代理通知）
+│       ├── session.js  #   会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
+│       ├── teams.js    #   团队轮询（实时→快照回退）+ 层级区域布局
+│       ├── scene.js    #   场景装配：需求时间轴 + 嵌套区域 + 类型化连线
+│       ├── view.js     #   相机、虚拟化挂载、节点渲染、检查器、主渲染
+│       ├── artwork.js  #   立绘映射（角色关键词 → 职业图，状态 → 动作图）
+│       └── actions.js  #   交互：草稿 / 追问 / 分支 / 归档 / 快捷词 / 选择追问
+├── index.js            # 宿主侧入口：WorkspaceStore + 会话事件投影 + 信封解析 + 路由
+├── client.js           # 客户端：一个 conversation.view 标签（内嵌 iframe）+ 主题跟随 + 动作中继
+├── engine.js           # 画布引擎：相机 / 手势 / 视口裁剪 / 连线几何 / 拖拽绑定
 ├── theme.css           # 设计 token（浅/深一套变量）+ 全部组件样式
 ├── assets/             # 15 张立绘（9 职业 + 6 状态）
-├── src/                # ES 模块，按层分目录
-│   └── canvas/         #   统一画布页面（浏览器侧，唯一会被 HTTP 服务的一层）
-│       ├── canvas.js   #     入口：宿主桥、实时回复、轮询、启动
-│       ├── core.js     #     共享状态、几何常量、localStorage、宿主桥接、成员配色
-│       ├── markdown.js #     Markdown 渲染（含 ■ 分节规范化）
-│       ├── relay.js    #     智能体信封解析（中继/成员消息/子代理通知）
-│       ├── session.js  #     会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
-│       ├── teams.js    #     团队轮询（实时→快照回退）+ 层级区域布局
-│       ├── scene.js    #     场景装配：需求时间轴 + 嵌套区域 + 类型化连线
-│       ├── view.js     #     相机、虚拟化挂载、节点渲染、检查器、主渲染
-│       ├── artwork.js  #     立绘映射（角色关键词 → 职业图，状态 → 动作图）
-│       └── actions.js  #     交互：草稿 / 追问 / 分支 / 归档 / 快捷词 / 选择追问
-├── cordis.patch.yml    # 插入 dsh-flow 服务
+├── kernel.js           # 组合根：唯一一处把 store / runner / tools 摆在一起的地方
+├── cordis.patch.yml    # 插入 dsh-flow 服务，并给出它的 config
 └── package.json        # dsh.bundle.patch + dsh.client.inject
 ```
+
+**依赖只指向内侧。** `rules` 不依赖任何层；`store` / `sources` / `runner` / `tools` /
+`config` 只依赖 `rules`；`canvas` 只读 `rules`（团队数据经 HTTP 到达，不靠 import）；
+组合根依赖全部。每一条边在门里都有断言。
+
+**两条 seam 的形态不同，且这个区别是硬的。** 一个名字只能有一个 provider，所以实现
+**真的共存**的 seam 必须是注册表（`flowTeamSources`：迁移期原生团队与
+`.agent-teams` 团队同时可见），而两个实例**会打架**的 seam 必须在组合期定死
+（`flowRunner`：两个调度器会抢同一个任务）。
 
 ## 参考
 
@@ -200,12 +222,22 @@ dsh-flow (纯 JS，无运行时依赖)
 ## 开发
 
 ```sh
-node --check index.js && node --check client.js \
-  && node --check engine.js && for f in src/canvas/*.js; do node --check "$f"; done
+pnpm test        # 365 项：规则核心、真文件系统的 store、调度器、工具、整个内核
+pnpm run build   # 语法 + 逐层边界 + serve 白名单 + 主题 token 纪律
+pnpm test:diff   # 31 项与 dsh-agent-teams 的差分
 
 dsh web
 # 对话区顶部标签行点「智能体画布」
 ```
+
+**改完 `src/` 里的东西一定要跑 `pnpm run build`。** 它不只是语法检查：每一层的
+不变量都在那里断言（纯核不许碰 IO 与 `ctx`、画布不许碰 `node:` 或任何 host 层、
+host 层不许进 serve 白名单、依赖只许指向内侧、每层的入口必须存在）。这些错误的
+共同点是**在 `pnpm test` 下全绿** —— 一个画布模块 `import 'node:fs'` 只有浏览器会
+发现，一个漏进白名单的模块只有一个 404 会发现。
+
+一条没有断言的边界会随时间消失，剩下的只是一个碰巧这么放的目录。
+
 
 改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `src/**` / `theme.css` / `assets/*.png` 按 mtime 走内存缓存并以 `cache-control: no-cache` + ETag 复验——每次请求都会确认文件没变（变了就回 200 新内容），所以改完刷新页面即可。
 

@@ -31,7 +31,7 @@ import { installRetiredMemberGuard } from './src/runner/retired-guard.js'
 import { createFlowStore } from './src/store/index.js'
 import { createPlanHooks } from './src/config/hooks.js'
 import { createProfileRegistry, describeProfiles } from './src/config/profile-registry.js'
-import { createSourceRegistry } from './src/store/sources.js'
+import { createSourceRegistry } from './src/sources/sources.js'
 import { installFlowTools } from './src/tools/index.js'
 import { RETIRED_MEMBERS_FILE, mergeRetiredMemberIds, parseRetiredMemberIds, serializeRetiredMemberIds } from './src/rules/index.js'
 

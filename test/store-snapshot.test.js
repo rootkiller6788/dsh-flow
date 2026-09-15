@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createFlowStore } from '../src/store/index.js'
-import { createSourceRegistry } from '../src/store/sources.js'
+import { createSourceRegistry } from '../src/sources/sources.js'
 import { canvasSnapshot, teamSnapshot } from '../src/store/snapshot.js'
 import { teamEvent } from '../src/rules/index.js'
 

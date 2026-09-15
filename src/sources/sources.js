@@ -12,8 +12,7 @@
 // The executor seam is the opposite, deliberately. Two live schedulers would
 // both claim the same task, so there is no runtime decision to make and the
 // mount decides instead.
-import { isTeamId } from '../rules/index.js'
-import { SOURCE_ID as NATIVE_ID } from './source-native.js'
+import { SOURCE_ID as NATIVE_ID, createNativeSource } from './source-native.js'
 import { SOURCE_ID as AGENT_TEAMS_ID, createAgentTeamsSource } from './source-agent-teams.js'
 
 /** Source ids this build ships. */
@@ -99,38 +98,4 @@ export function createSourceRegistry(options) {
     }))
   }
   return registry
-}
-
-/**
- * The native source: the store itself.
- *
- * A thin adapter rather than an interface the store implements, because the
- * store is used directly by far more code than the registry is — making every
- * caller go through a source object to reach its own log would be ceremony
- * without a second implementation to justify it.
- */
-function createNativeSource(service) {
-  return {
-    id: NATIVE_ID,
-    describe() {
-      return {
-        id: NATIVE_ID,
-        writable: true,
-        origin: "this deployment's own team log",
-        note: 'the log is the record; state.json is a reading of it that can be rebuilt',
-      }
-    },
-    canEnumerate: () => true,
-    canLoad: teamId => isTeamId(teamId),
-    canAppend: () => true,
-    async enumerate() {
-      return (await service.listTeamIds()).map(teamId => ({ teamId }))
-    },
-    load: teamId => service.readTeamEvents(teamId),
-    readMailbox: (teamId, memberName, onMalformedLine) => (
-      service.readMailbox(teamId, memberName, onMalformedLine)
-    ),
-    /** The one operation only a source that can append has at all. */
-    append: (teamId, events) => service.appendEvents(teamId, events),
-  }
 }

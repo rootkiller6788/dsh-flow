@@ -79,6 +79,20 @@ test('the checkpoint is rewritten on every append', async t => {
   assert.equal(JSON.parse(readFileSync(join(teams.root, 'T', STATE_FILE), 'utf8')).halted, true)
 })
 
+test('a record carries the directory it was read from, not the name it sanitizes to', async t => {
+  // The projection derives an id from the team's name. If that were what a
+  // caller wrote back with, a team filed under "T" but named "T" would write
+  // its next event into a second, empty directory under "t" — and the original
+  // would silently stop being updated.
+  const teams = store(t)
+  await teams.createTeam('T')
+  await teams.appendEvents('T', [
+    teamEvent('team.created', { name: 'T', captainSessionId: 's' }, 1, 0),
+  ])
+  assert.equal((await teams.readTeam('T')).id, 'T')
+  assert.equal((await teams.materialize('T')).id, 'T')
+})
+
 test('nextSeq follows the log length, so a caller never guesses', async t => {
   const teams = store(t)
   await teams.createTeam('T')

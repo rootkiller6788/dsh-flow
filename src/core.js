@@ -36,7 +36,8 @@ const CLUSTER_GAP = 150
 const CAMERA_INSET_X = 56
 const CAMERA_INSET_Y = 56
 const VIEWPORT_MARGIN = 1400
-const STATE_URL = '/plugins/dsh-agent-teams/state'
+// The canvas' own team feed, served by this plugin from its own store.
+const TEAMS_URL = '/dsh-flow/map-api/teams'
 
 // ---------------------------------------------------------------------------
 // State
@@ -149,5 +150,5 @@ export { app, Engine, state, escapeHtml, selectorValue, turnPositions, clusterPo
   TURN_POSITIONS_KEY, CLUSTER_POSITIONS_KEY, COLLAPSED_CARDS_KEY, QUICK_PHRASES_KEY, BRANCH_ANCHORS_KEY,
   DEFAULT_QUICK_PHRASES, MAX_QUICK_PHRASES, MAX_QUICK_PHRASE_LENGTH,
   TURN_W, TURN_H, TURN_STEP_X, TEAM_W, TEAM_H, MEMBER_W, MEMBER_H, MEMBER_GAP,
-  TASK_W, TASK_H, TASK_GAP_X, TASK_GAP_Y, CLUSTER_GAP, VIEWPORT_MARGIN, STATE_URL,
+  TASK_W, TASK_H, TASK_GAP_X, TASK_GAP_Y, CLUSTER_GAP, VIEWPORT_MARGIN, TEAMS_URL,
   WHO_PALETTE, WHO_SOLID, whoHash, whoVars, whoSolid }

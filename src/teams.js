@@ -1,42 +1,39 @@
 // dsh-flow canvas — see src/canvas.js for the module map.
-import { state, api, clusterPositions, canReplaceView, CLUSTER_GAP, STATE_URL, TURN_W, TURN_H, TEAM_W, TEAM_H, MEMBER_W, MEMBER_H, MEMBER_GAP, TASK_W, TASK_H, TASK_GAP_X, TASK_GAP_Y } from './core.js'
+import { state, api, clusterPositions, canReplaceView, CLUSTER_GAP, TEAMS_URL, TURN_W, TURN_H, TEAM_W, TEAM_H, MEMBER_W, MEMBER_H, MEMBER_GAP, TASK_W, TASK_H, TASK_GAP_X, TASK_GAP_Y } from './core.js'
 import { render } from './view.js'
 
 
 // ---------------------------------------------------------------------------
-// Team layer (agent-teams state feed)
+// Team layer (dsh-flow's own team store)
 // ---------------------------------------------------------------------------
+/**
+ * Read the teams from dsh-flow's own store.
+ *
+ * This used to poll agent-teams' live feed and mirror a copy into local
+ * storage, because the canvas was a view of somebody else's state. The store
+ * has been the source since the kernel was mounted, so it is one read now —
+ * and one read is the point: a mirror is a second record of the same team, and
+ * the two could disagree about what happened.
+ */
 async function pollTeams() {
   let body
   try {
-    body = await api(STATE_URL)
+    body = await api(TEAMS_URL)
     state.teamsError = false
   } catch {
-    // Live feed unavailable (plugin removed or down): fall back to dsh-flow's
-    // own stored snapshot so team regions keep rendering as history.
+    // The route is served by this same plugin, so this failing means the
+    // server is not answering rather than that a dependency is missing.
+    state.teamsError = true
     state.teamsLoaded = true
-    try {
-      const stored = await api('/dsh-flow/map-api/teams')
-      const teams = Array.isArray(stored?.teams) ? stored.teams : []
-      const signature = JSON.stringify(teams.map(team => [team.teamId, team.name, team.phase, team.halted]))
-      if (signature !== state.teamsSignature) {
-        state.teamsSignature = signature
-        state.teams = teams
-        if (canReplaceView()) render()
-      } else if (state.teams.length === 0 && teams.length > 0) {
-        state.teams = teams
-        if (canReplaceView()) render()
-      }
-    } catch { /* no stored snapshot either */ }
+    if (canReplaceView()) render()
     return
   }
-  // Mirror the live snapshot into dsh-flow's own storage (fire-and-forget):
-  // the team data then outlives the agent-teams plugin itself.
-  void api('/dsh-flow/map-api/teams/snapshot', { method: 'POST', body: JSON.stringify({ teams: body?.teams ?? [] }) }).catch(() => {})
   state.teamsLoaded = true
   const snapshots = Array.isArray(body?.teams) ? body.teams : []
+  // The signature decides whether anything a view reads has changed, so an idle
+  // poll costs one render and no DOM work.
   const signature = JSON.stringify(snapshots.map(team => [
-    team.teamId, team.name, team.phase, team.halted,
+    team.teamId, team.name, team.phase, team.halted, team.archived,
     (team.members ?? []).map(member => [member.name, member.status, member.done, member.total, member.unread, member.currentTask]),
     (team.tasks ?? []).map(task => [task.id, task.state, task.assignee, task.depth]),
   ]))

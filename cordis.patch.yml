@@ -1,9 +1,12 @@
 # dsh-flow serves two canvases from the existing DSH Web Server:
-#   /dsh-flow/      the team canvas (members + task dependency DAG), which polls
-#                   dsh-agent-teams' /state endpoint. Read-only: it never writes
-#                   agent-teams state.
-#   /dsh-flow/map/  the session map (conversation graph), backed by a local
-#                   workspace store under the DSH home directory.
+#   /dsh-flow/      the unified canvas: the session map, with team regions and
+#                   member lanes composed into it, read from dsh-flow's own
+#                   team store.
+#   /dsh-flow/map/  a redirect to the same page.
+#
+# It also mounts the team kernel — the store, the executor and the thirteen
+# flow_* tools — from the same config block. The canvas and the kernel are one
+# plugin because they are one record: the canvas renders what the kernel wrote.
 - insert:
     - id: dsh-flow
       name: dsh-flow
@@ -15,3 +18,58 @@
         # Extra authorities the /dsh-flow Host check accepts (host or host:port);
         # localhost and 127.0.0.1 are always allowed.
         trustedHosts: []
+
+        # --- the team kernel -------------------------------------------------
+        # Where teams live. Relative paths resolve against the session working
+        # directory, which is what keeps one deployment's teams out of another's.
+        stateDir: .dsh-flow
+
+        # Which executor is mounted. This is a composition-time choice rather
+        # than a runtime one, deliberately: two live schedulers would both claim
+        # the same task, so 'manual' is how a deployment says "show me teams but
+        # do not run them" without a second build.
+        #   manual     — the canvas reads and the tools work; nothing executes.
+        #   subagents  — the real kernel. Do not run this alongside another
+        #                plugin that drives ctx.subagents.
+        runner: subagents
+
+        # The subagent provider members are started with.
+        memberProvider: spawn
+
+        # A member cap for profile rosters and for the teams they produce.
+        maxMembers: 8
+
+        # Team profiles: a named roster, seed tasks and a review policy. These
+        # are deployment configuration rather than protocol — which teams a
+        # deployment offers is its own business — so they live here.
+        #
+        # Task planning is either `seed` (the tasks below define the graph) or
+        # `captain` (the roster is given, the graph is the captain's to design).
+        profiles:
+          feature:
+            description: Take a feature from a stated requirement to reviewed code.
+            protocol: |
+              Requirements are pinned by one member and reviewed by another before
+              any implementation starts. An implementation is not complete until
+              its acceptance criteria and verification commands are reported, and
+              a failed review schedules its own repair round.
+            taskPlanning: seed
+            reviewPolicy:
+              requirementsMinRounds: 1
+              requirementsMaxRounds: 4
+              codeMaxRounds: 3
+              maxRepairAttempts: 2
+            members:
+              - name: 需求分析师
+                role: analyst
+                reasoning_effort: high
+              - name: 程序员
+                role: engineer
+            tasks:
+              - id: requirements
+                subject: Pin the requirements
+                assignee: 需求分析师
+              - id: implement
+                subject: Implement the change
+                assignee: 程序员
+                dependencies: [requirements]

@@ -6,19 +6,13 @@ import zlib from 'node:zlib'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
+import { installFlowKernel } from './kernel.js'
+import { canvasSnapshot } from './src/store/snapshot.js'
 
 export const name = 'dsh-flow'
 export const inject = ['webServer', 'sessions']
 
 const MAX_BODY_BYTES = 32 * 1024
-// The team-snapshot route is the one endpoint whose body is not user input: the
-// canvas mirrors the whole live agent-teams state through it, and that state
-// still carries the fields the snapshot itself strips (executionPrompt alone is
-// ~3.4KB per member). A real 4-member team measures 13.4KB, so the 32KB shared
-// cap left barely 2.4x of headroom — and blowing past it failed silently (the
-// canvas' POST is fire-and-forget, so the snapshot just stopped updating). 1MB
-// fits a team two orders of magnitude larger than the measured one.
-const MAX_SNAPSHOT_BYTES = 1024 * 1024
 const MAX_TITLE_LENGTH = 120
 const MAX_NOTE_LENGTH = 4_000
 // Projected message text cap: longer replies truncate with a marker pointing
@@ -1160,25 +1154,6 @@ function sendFile(res, contentType, body, etag) {
   // HEAD shares the headers without the payload.
   res.end(res.req?.method === 'HEAD' ? undefined : body)
 }
-
-// Fields the live agent-teams state carries that no canvas view reads. The
-// snapshot is the canvas' own copy — the one that keeps team regions rendering
-// after agent-teams is gone — so it stores what it renders and nothing else.
-// Measured on a real 4-member team: `executionPrompt` is 93% of a member's
-// bytes and a task's `description` 74% of its, so dropping them takes the
-// snapshot from ~13KB to ~3KB.
-const UNRENDERED_TEAM_FIELDS = new Set(['description', 'executionPrompt', 'provider', 'reasoningEffort'])
-function slimTeam(team) {
-  const strip = source => Object.fromEntries(Object.entries(source ?? {}).filter(([key]) => !UNRENDERED_TEAM_FIELDS.has(key)))
-  const slim = strip(team)
-  // Members and tasks are the two array fields that carry the bulk; strip the
-  // same fields inside them.
-  for (const [key, value] of Object.entries(slim)) {
-    if (Array.isArray(value)) slim[key] = value.map(entry => entry !== null && typeof entry === 'object' ? strip(entry) : entry)
-  }
-  return slim
-}
-
 /** The unified agent canvas: one page, one engine, one graph. */
 function canvasPage() {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>智能体画布</title><link rel="stylesheet" href="/dsh-flow/theme.css"></head><body><div id="app"></div><script src="/dsh-flow/engine.js"></script><script type="module" src="/dsh-flow/src/canvas.js"></script></body></html>`
@@ -1204,7 +1179,29 @@ export function apply(ctx, config) {
     store.watchExit()
     return () => { store.unwatchExit(); store.flushSync() }
   }, 'dsh-flow: flush the debounced write on teardown')
-  const teamsFile = join(dirname(config?.dataFile ?? '.'), 'teams.json')
+
+  // The team kernel: the store, the executor and the tools. Mounted here so a
+  // deployment that only wants the canvas can say `runner: 'manual'` rather
+  // than not load the plugin — the choice is configuration, not a second build.
+  //
+  // A mount that fails must not take the canvas down with it: the canvas is how
+  // a human sees that something is wrong, so the failure is reported and the
+  // routes are served against an empty set rather than not served at all.
+  let kernel
+  try {
+    kernel = installFlowKernel(ctx, {
+      stateDir: config?.stateDir ?? '.dsh-flow',
+      profiles: config?.profiles,
+      maxMembers: config?.maxMembers,
+      runner: config?.runner ?? 'subagents',
+      captainPrompt: config?.captainPrompt,
+      executionPrompt: config?.executionPrompt,
+      memberProvider: config?.memberProvider,
+    })
+  } catch (error) {
+    ctx.logger.error(error instanceof Error ? error : new Error(String(error)))
+  }
+
   const autoProjection = config?.autoProjection !== false
   const projectionWorkspaceTitle = typeof config?.projectionWorkspaceTitle === 'string' && config.projectionWorkspaceTitle.trim() !== ''
     ? config.projectionWorkspaceTitle.trim().slice(0, MAX_TITLE_LENGTH)
@@ -1228,13 +1225,6 @@ export function apply(ctx, config) {
     suppressedFailures = 0
     ctx.logger.warn(suppressed === 0 ? reported : new Error(`${reported.message}（同一窗口内另有 ${suppressed} 次失败未单独记录）`))
   }
-  // teams.json shares the directory and the temp-file convention, so a crashed
-  // snapshot write can strand a file the same way. The store swept its own file
-  // during load; this covers the sibling.
-  void store.sweepTempFiles(teamsFile).catch(reportProjectionFailure)
-  // Mtime/warn bookkeeping for the team snapshot's writer, the counterpart of
-  // the store's own fields.
-  const teamsWriteState = { lastKnownMtime: null, externalWarned: false, lockWarned: false }
   const replaySession = session => {
     // Forks inherit their parent's log. The canvas already represents that
     // history through the parent node, so only project the child's live tail.
@@ -1302,32 +1292,20 @@ export function apply(ctx, config) {
       const thread = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)$/i.exec(path)
       if (thread !== null && req.method === 'PATCH') return sendJson(res, 200, { thread: await store.updateThread(thread[1], await readJson(req)) })
       if (thread !== null && req.method === 'DELETE') return sendJson(res, 200, await store.removeThread(thread[1]))
-      // Team snapshot storage: the canvas polls the live agent-teams feed and
-      // mirrors it here, so team regions keep rendering even after the
-      // agent-teams plugin is removed (its data is frozen, not live).
+      // The teams the canvas renders, read from dsh-flow's own store.
+      //
+      // This used to be a mirror: the canvas polled agent-teams' live feed and
+      // POSTed a copy back here, so the regions kept rendering after that
+      // plugin was removed. It is a read now, because the store has been the
+      // source since the kernel was mounted — and a mirror of a foreign feed
+      // would be a second record of a team, able to disagree with the log.
       if (path === '/dsh-flow/map-api/teams' && req.method === 'GET') {
-        try {
-          // The canvas polls this once a second whenever the live agent-teams
-          // feed is unavailable, so it goes through the same mtime-keyed cache
-          // the static files use instead of reading and parsing the file each
-          // time. No gzip: the payload is handed to JSON.parse in-process.
-          const entry = await cachedBody('teams.json', teamsFile, false)
-          const stored = JSON.parse(entry.body.toString('utf8'))
-          return sendJson(res, 200, { teams: Array.isArray(stored.teams) ? stored.teams : [] })
-        } catch {
-          return sendJson(res, 200, { teams: [] })
-        }
-      }
-      if (path === '/dsh-flow/map-api/teams/snapshot' && req.method === 'POST') {
-        const body = await readJson(req, MAX_SNAPSHOT_BYTES)
-        if (!Array.isArray(body?.teams)) throw new InputError('teams 必须是数组')
-        const teams = body.teams.map(slimTeam)
-        // Same cross-process discipline as workspaces.json. This write used to
-        // be tmp+rename only: atomic, but silent about a second instance, and
-        // the canvas POSTs it fire-and-forget on every poll — two instances
-        // would overwrite each other's team data with nothing to notice it by.
-        await guardedWrite(teamsFile, 'teams.json', teamsWriteState, `${JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), teams })}\n`, 'utf8')
-        return sendJson(res, 200, { stored: teams.length })
+        if (kernel === undefined) return sendJson(res, 200, { teams: [] })
+        return sendJson(res, 200, await canvasSnapshot(kernel.store.service, {
+          onMalformedLine: (teamId, memberName, line, error) => ctx.logger.warn(
+            `dsh-flow: ${teamId}/${memberName} mailbox line ${line}: ${error.message}`,
+          ),
+        }))
       }
       return sendJson(res, 404, { error: '接口不存在' })
     } catch (error) {

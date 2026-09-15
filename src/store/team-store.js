@@ -133,10 +133,17 @@ export function createTeamStore(options) {
      * Always derived, never read from the checkpoint: a checkpoint that has
      * drifted from its log is a bug, and reading the log makes drift impossible
      * to observe rather than merely unlikely.
+     *
+     * The record's `id` is pinned to the directory it was read from. The
+     * projection derives an id from the team's *name*, and the two can differ —
+     * a name that sanitizes differently from the directory it is filed under —
+     * which would leave every later write addressing a second, empty team.
+     * The directory is the identity; the name is display text.
      */
     async readTeam(teamId) {
       const projected = projectTeam(await readEvents(teamId))
-      return projected?.state
+      if (projected === undefined) return undefined
+      return { ...projected.state, id: teamId }
     },
 
     /** The events behind a team, for replay and inspection. */
@@ -208,11 +215,11 @@ export function createTeamStore(options) {
      *   log twice.
      */
     async materialize(teamId) {
-      const events = await readEvents(teamId)
-      const projected = projectTeam(events)
+      const projected = projectTeam(await readEvents(teamId))
       if (projected === undefined) return undefined
-      await writeAtomic(join(teamDir(teamId), STATE_FILE), `${JSON.stringify(projected.state, null, 2)}\n`)
-      return projected.state
+      const state = { ...projected.state, id: teamId }
+      await writeAtomic(join(teamDir(teamId), STATE_FILE), `${JSON.stringify(state, null, 2)}\n`)
+      return state
     },
 
     /** Read the checkpoint without replaying, for a caller that wants the fast path. */

@@ -1,2 +1,7 @@
 node_modules/
 pnpm-lock.yaml
+
+# 内部计划文档：不进仓库。PLAN-ABSORB.md 已从未推送历史里彻底抹掉；
+# PLAN.md 曾随 origin/main 发布过，本次只是停止跟踪，已发布的历史未改写。
+PLAN.md
+PLAN-ABSORB.md

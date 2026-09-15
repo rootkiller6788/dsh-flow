@@ -8,6 +8,8 @@ import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { installFlowKernel } from './kernel.js'
 import { isTeamId } from './src/rules/index.js'
+import { FlowToolError } from './src/tools/define.js'
+import { applyTeamApproval, applyTeamEdits } from './src/tools/lifecycle.js'
 import { canvasSnapshot, readTaskHistory } from './src/store/snapshot.js'
 
 export const name = 'dsh-flow'
@@ -1305,6 +1307,47 @@ export function apply(ctx, config) {
         const history = await readTaskHistory(kernel.store.service, teamId, taskId)
         if (history === undefined) throw new NotFoundError('没有这个团队或任务')
         return sendJson(res, 200, history)
+      }
+
+      // Editing and starting a staged plan from the canvas.
+      //
+      // **Authorisation here is the Host check, not a session.** An HTTP request
+      // carries no identity: the caller is the human at this deployment's own
+      // loopback interface, which is who a person editing their own staged plan
+      // through their own canvas is. That is also why the tool layer's captain
+      // check has no analogue to offer — there is no session to check, and
+      // inventing one would be the appearance of a guarantee rather than one.
+      //
+      // Two things keep this from becoming a way *around* the tool layer rather
+      // than beside it. The work itself is `applyTeamEdits` / `applyTeamApproval`
+      // — the same functions `flow_edit_plan` and `flow_approve` call, so K8 and
+      // the staged-phase rule each decide once. And only a *writable* source is
+      // accepted: a team imported from `.agent-teams/` is somebody else's record,
+      // and appending to it would write a second copy of a team into our log
+      // under an id we do not own.
+      const planWrite = /^\/dsh-flow\/map-api\/teams\/([^/]+)\/(plan|approve)$/.exec(path)
+      if (planWrite !== null && req.method === 'POST') {
+        if (kernel === undefined) throw new NotFoundError('this deployment mounted no team kernel')
+        const teamId = decodeURIComponent(planWrite[1])
+        const action = planWrite[2]
+        if (!isTeamId(teamId)) throw new InputError('团队 id 不合法')
+        const body = action === 'plan' ? await readJson(req) : {}
+        const owning = (await kernel.sources.enumerate()).find(entry => entry.teamId === teamId)
+        const source = owning === undefined ? undefined : kernel.sources.get(owning.source)
+        if (source === undefined) throw new NotFoundError('没有这个团队')
+        if (source.canAppend?.(teamId) !== true) throw new InputError('这个团队的来源是只读的，不能从画布改动')
+        try {
+          const result = action === 'approve'
+            ? await applyTeamApproval(kernel.store.toolDeps, teamId)
+            : await applyTeamEdits(kernel.store.toolDeps, teamId, { ...body, teamId })
+          return sendJson(res, 200, result)
+        } catch (error) {
+          // The rules refuse an edit as an answer, not an exception. A refusal is
+          // the caller's to read, so it comes back as a 400 in its own words
+          // rather than as a generic server failure.
+          if (error instanceof FlowToolError) throw new InputError(error.message)
+          throw error
+        }
       }
 
       const messages = /^\/dsh-flow\/map-api\/threads\/([0-9a-f-]+)\/messages$/i.exec(path)

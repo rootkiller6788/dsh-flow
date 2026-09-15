@@ -85,25 +85,51 @@ export function editPlanTool(deps) {
       // session that names a team it does not lead is refused rather than
       // obeyed, and the team is located from the caller instead.
       const located = await locateTeamByCaptain(exec, deps)
-      const teamId = located.team.id
-      return deps.withTeamLock(teamId, async () => {
-        // Re-read under the lock: the plan may have been edited or approved
-        // since it was located, and the caller may no longer lead it.
-        const team = await requireFresh(teamId, located.caller, 'captain', deps)
-        if (team.phase !== 'staged') {
-          throw new FlowToolError(`team "${teamId}" is ${team.phase ?? 'running'}; only a staged plan can be edited`)
-        }
-        const planned = deps.planEdits(team, args, deps.now())
-        // The expander reports a refused edit as `{ error }` rather than by
-        // throwing: it is pure rules code, and a rule that cannot be applied is
-        // an answer, not an exception. Saying so is this layer's job.
-        if (!Array.isArray(planned)) throw new FlowToolError(planned.error)
-        if (planned.length === 0) throw new FlowToolError('nothing to change')
-        await deps.appendEvents(teamId, planned)
-        const next = await deps.materialize(teamId)
-        return { teamId, members: next.members.length, tasks: next.tasks.length }
-      })
+      return applyTeamEdits(deps, located.team.id, args, located.caller)
     },
+  })
+}
+
+/**
+ * Apply one edit to a staged plan.
+ *
+ * Shared with the canvas route rather than reimplemented there, and the sharing
+ * that matters is the *gate*: `deps.planEdits` runs K8 over every task the edit
+ * would create, and a second copy of that rule would be a second answer to
+ * whether a task is allowed to exist.
+ *
+ * @param deps - the tool dependencies.
+ * @param teamId - the team to edit.
+ * @param args - `{ addMembers, removeMembers, addTasks, removeTasks }`.
+ * @param caller - the identity the edit is made as. Optional: a caller that
+ *   arrives from the canvas has no session to check, and saying so here is
+ *   better than inventing one — see the route that passes nothing.
+ * @returns `{ teamId, members, tasks }`.
+ */
+export async function applyTeamEdits(deps, teamId, args, caller) {
+  return deps.withTeamLock(teamId, async () => {
+    // With a caller, re-check authority under the lock: the read that located
+    // the team is a *locator*, and by now the team may have been approved or the
+    // caller removed from it.
+    const team = caller === undefined
+      ? await deps.readTeam(teamId)
+      : await requireFresh(teamId, caller, 'captain', deps)
+    if (team === undefined) throw new FlowToolError(`no team "${teamId}"`)
+    // Only a staged team has a plan to edit. A running team's task list is the
+    // record of what is happening, and rewriting it underneath live members
+    // would invalidate attempts they are holding.
+    if (team.phase !== 'staged') {
+      throw new FlowToolError(`team "${teamId}" is ${team.phase ?? 'running'}; only a staged plan can be edited`)
+    }
+    const planned = deps.planEdits(team, args, deps.now())
+    // The expander reports a refused edit as `{ error }` rather than by
+    // throwing: it is pure rules code, and a rule that cannot be applied is an
+    // answer, not an exception. Saying so is this layer's job.
+    if (!Array.isArray(planned)) throw new FlowToolError(planned.error)
+    if (planned.length === 0) throw new FlowToolError('nothing to change')
+    await deps.appendEvents(teamId, planned)
+    const next = await deps.materialize(teamId)
+    return { teamId, members: next.members.length, tasks: next.tasks.length }
   })
 }
 
@@ -128,26 +154,44 @@ export function approveTeamTool(deps) {
       // The team is located from the caller, not from `args.teamId`: a session
       // that names a team it does not lead is refused rather than obeyed.
       const located = await locateTeamByCaptain(exec, deps)
-      const teamId = located.team.id
-      const started = await deps.withTeamLock(teamId, async () => {
-        const team = await requireFresh(teamId, located.caller, 'captain', deps)
-        if (team.phase !== 'staged') {
-          throw new FlowToolError(`team "${teamId}" is already ${team.phase ?? 'running'}`)
-        }
-        const now = deps.now()
-        await deps.appendEvents(teamId, [
-          { type: 'team.phase_changed', at: now, seq: await deps.nextSeq(teamId), from: 'staged', to: 'running' },
-        ])
-        await deps.materialize(teamId)
-        return true
-      })
-      if (!started) return { teamId, phase: 'running', spawned: 0 }
-
-      const spawned = await deps.spawnMembers(teamId)
-      await deps.kickTeam(teamId)
-      return { teamId, phase: 'running', spawned }
+      return applyTeamApproval(deps, located.team.id, located.caller)
     },
   })
+}
+
+/**
+ * Start a staged plan: record the phase change, then spawn and dispatch.
+ *
+ * Shared with the canvas route, and the sharing that matters is the *order*: the
+ * phase change is durable before anything is started, so a spawn that fails
+ * halfway leaves a running team with unspawned members — which is a state the
+ * next resume repairs — rather than a staged team that secretly has children.
+ *
+ * @param deps - the tool dependencies.
+ * @param teamId - the team to start.
+ * @param caller - the identity the approval is made as. Optional: a caller that
+ *   arrives from the canvas has no session to check.
+ * @returns `{ teamId, phase, spawned }`.
+ */
+export async function applyTeamApproval(deps, teamId, caller) {
+  await deps.withTeamLock(teamId, async () => {
+    const team = caller === undefined
+      ? await deps.readTeam(teamId)
+      : await requireFresh(teamId, caller, 'captain', deps)
+    if (team === undefined) throw new FlowToolError(`no team "${teamId}"`)
+    if (team.phase !== 'staged') {
+      throw new FlowToolError(`team "${teamId}" is already ${team.phase ?? 'running'}`)
+    }
+    const now = deps.now()
+    await deps.appendEvents(teamId, [
+      { type: 'team.phase_changed', at: now, seq: await deps.nextSeq(teamId), from: 'staged', to: 'running' },
+    ])
+    await deps.materialize(teamId)
+  })
+
+  const spawned = await deps.spawnMembers(teamId)
+  await deps.kickTeam(teamId)
+  return { teamId, phase: 'running', spawned }
 }
 
 /**

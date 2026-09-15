@@ -316,6 +316,26 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .attempt-code { flex: none; border-radius: var(--r-sm); background: var(--err-soft); padding: 1px 6px; color: var(--err); font-family: var(--mono); font-size: 10.5px; }
 .attempt-why { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .attempt-row > .chip { margin-left: auto; }
+/* Staged-plan editor: the canvas' one write surface for a team */
+.plan-editor { display: grid; gap: 6px; }
+.plan-editor input { min-width: 0; flex: 1; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); padding: 5px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.plan-editor input:focus-visible { border-color: var(--accent); outline: none; }
+.plan-group { margin-top: 6px; color: var(--faint); font-size: 11px; font-weight: 650; }
+.plan-row { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 6px 10px; }
+.plan-name { color: var(--text); font-size: 12px; font-weight: 600; }
+.plan-role { color: var(--faint); font-size: 10.5px; }
+.plan-id { flex: none; color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 650; }
+.plan-subject { flex: 1; min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.plan-deps { flex: none; color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
+.plan-drop { margin-left: auto; border: 0; border-radius: var(--r-sm); background: transparent; padding: 3px 7px; color: var(--faint); font: inherit; font-size: 11px; cursor: pointer; }
+.plan-drop:hover { background: var(--err-soft); color: var(--err); }
+.plan-add { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.plan-add button { flex: none; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel-2); padding: 5px 10px; color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+.plan-add button:hover { border-color: var(--accent-line); color: var(--accent); }
+.plan-empty { border: 1px dashed var(--line); border-radius: var(--r-md); padding: 8px 10px; color: var(--faint); font-size: 11.5px; }
+.plan-foot { margin-top: 8px; }
+.plan-foot .primary { width: 100%; border: 0; border-radius: var(--r-md); background: var(--accent); padding: 8px 12px; color: var(--on-accent); font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; }
+.plan-foot .primary:hover { background: var(--accent-strong); }
 
 /* ── Team inspector: portrait member rows + task dependency list ──────── */
 .team-member-list { display: flex; flex-direction: column; gap: 10px; }

@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { installFlowTools } from '../src/tools/index.js'
 import { FLOW_TOOL_NAMES } from '../src/rules/index.js'
+import { applyTeamApproval, applyTeamEdits } from '../src/tools/lifecycle.js'
 import { createFakeHost } from './support/fake-host.js'
 
 /** A recording set of tool dependencies. */
@@ -155,6 +156,28 @@ test('somebody else\'s plan cannot be edited', async () => {
     /not leading any team/,
   )
   assert.deepEqual(built.events, [])
+})
+
+test('an edit with no caller still runs every other rule', async () => {
+  // The canvas route has no session to check, so it passes no caller. What it
+  // must not lose is everything else: the staged-phase rule, and K8 inside
+  // `planEdits`. The edit is the same function either way — only the authority
+  // check differs, and it is the one thing there is nothing to check against.
+  const running = buildTools({ team: { id: 'T', phase: 'running', members: [], tasks: [] } })
+  await assert.rejects(
+    () => applyTeamEdits(running.deps, 'T', { addTasks: [{ subject: 'x' }] }),
+    /only a staged plan can be edited/,
+  )
+  assert.deepEqual(running.events, [])
+
+  const missing = buildTools()
+  await assert.rejects(() => applyTeamEdits(missing.deps, 'ghost', { addTasks: [{ subject: 'x' }] }), /no team "ghost"/)
+})
+
+test('approving with no caller still refuses what the tool would refuse', async () => {
+  const built = buildTools({ team: { id: 'T', phase: 'running', members: [], tasks: [] } })
+  await assert.rejects(() => applyTeamApproval(built.deps, 'T'), /is already running/)
+  assert.deepEqual(built.spawnCalls, [], 'and nothing was started')
 })
 
 test('approving moves the phase and spawns the members', async () => {

@@ -115,6 +115,46 @@ const ATTEMPT_OUTCOME = {
 }
 
 /**
+ * The staged-plan editor — the only place the canvas writes to a team.
+ *
+ * A staged team is the one moment a plan is an *artifact* rather than a record
+ * of what is happening: nothing has been dispatched, so editing it cannot
+ * contradict anything already true. Once the team is running the same controls
+ * would be rewriting the task list underneath members holding attempts, which is
+ * why this renders only while the team is staged and only for a source that can
+ * be appended to — an imported `.agent-teams/` team is somebody else's record.
+ *
+ * The buttons carry their own `name`/`value`, so the browser reports *which one
+ * was pressed* as part of the form data. That removes the need for the panel to
+ * track a pending intent in `state`, which matters because `render()` replaces
+ * the whole document every frame and any panel-local state would be lost.
+ */
+export function stagedPlanHtml(team) {
+  if (team?.phase !== 'staged' || team?.writable !== true) return ''
+  const teamId = escapeHtml(team.teamId ?? '')
+  const drop = (name, value, label) => `<button type="submit" class="plan-drop" name="${name}" value="${escapeHtml(value)}" title="${label}">移除</button>`
+
+  const members = (team.members ?? []).map(member => `<div class="plan-row"><span class="plan-name">${escapeHtml(member.name)}</span>${member.role ? `<span class="plan-role">${escapeHtml(member.role)}</span>` : ''}${drop('removeMember', member.name, '从计划中移除')}</div>`).join('')
+  const tasks = (team.tasks ?? []).map(task => {
+    const deps = Array.isArray(task.dependencies) && task.dependencies.length > 0
+      ? `<span class="plan-deps">依赖 ${escapeHtml(task.dependencies.join(' '))}</span>`
+      : ''
+    return `<div class="plan-row"><span class="plan-id">${escapeHtml(task.id ?? '')}</span><span class="plan-subject">${escapeHtml(task.subject ?? task.id ?? '')}</span>${deps}${drop('removeTask', task.id ?? '', '从计划中移除')}</div>`
+  }).join('')
+
+  // A team with no members or no tasks says so rather than showing an empty
+  // group: an approved plan with an empty roster starts nothing and looks fine.
+  const memberGroup = (team.members ?? []).length === 0
+    ? '<div class="plan-empty">还没有成员。批准之前至少要有一个。</div>'
+    : `<div class="plan-group">成员</div>${members}`
+  const taskGroup = (team.tasks ?? []).length === 0
+    ? '<div class="plan-empty">还没有任务。</div>'
+    : `<div class="plan-group">任务</div>${tasks}`
+
+  return `<form class="process plan-editor" data-form="plan-edit" data-team="${teamId}"><div class="quality-line"><span class="quality-title">待审计划</span><span class="quality-count">可编辑</span></div>${memberGroup}<div class="plan-add"><input name="memberName" placeholder="新成员名字" aria-label="新成员名字"><input name="memberRole" placeholder="角色（可选）" aria-label="新成员角色"><button type="submit" name="intent" value="addMember">添加成员</button></div>${taskGroup}<div class="plan-add"><input name="taskSubject" placeholder="新任务标题" aria-label="新任务标题"><button type="submit" name="intent" value="addTask">添加任务</button></div><div class="plan-foot"><button type="submit" class="primary" name="intent" value="approve">批准并启动</button></div></form>`
+}
+
+/**
  * One task's attempt timeline.
  *
  * The reason this can exist at all: the log records both that an attempt failed

@@ -2,6 +2,7 @@
 import { state, app, api, post, dshRpc, escapeHtml, rememberBranchAnchor, deferCanvasRefresh, turnPositions, clusterPositions, persistQuickPhrases, persistCollapsedCards, MAX_QUICK_PHRASES, MAX_QUICK_PHRASE_LENGTH } from './core.js'
 import { render, camera, focusActiveNode, setError, openInspector, closeInspector } from './view.js'
 import { refreshSummaries, refreshProjection, draftPlacement, conversationCards, conversationGraphView, latestMessage } from './session.js'
+import { pollTeams } from './teams.js'
 
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,54 @@ async function submitDraft() {
     setError(error)
   }
 }
+/**
+ * Apply one staged-plan edit, or start the plan.
+ *
+ * Which control was pressed is the request: the buttons carry their own
+ * `name`/`value`, so the form data says what was meant without this having to
+ * remember a pending intent across a re-render. Whatever the browser submitted
+ * is exactly one edit, which is what the route accepts.
+ */
+async function submitPlanEdit(form) {
+  try {
+    const data = new FormData(form)
+    const teamId = encodeURIComponent(String(form.dataset.team ?? ''))
+    const intent = String(data.get('intent') ?? '')
+    const removeMember = data.get('removeMember')
+    const removeTask = data.get('removeTask')
+
+    if (intent === 'approve') {
+      await api(`/dsh-flow/map-api/teams/${teamId}/approve`, { method: 'POST', body: '{}' })
+    } else {
+      // One field per request, built here rather than in the panel: the panel
+      // renders, this decides, and a decision that needs no DOM is a decision
+      // that can be tested.
+      const edit = {}
+      if (removeMember !== null) edit.removeMembers = [String(removeMember)]
+      else if (removeTask !== null) edit.removeTasks = [String(removeTask)]
+      else if (intent === 'addMember') {
+        const name = String(data.get('memberName') ?? '').trim()
+        if (name === '') throw new Error('新成员需要一个名字')
+        const role = String(data.get('memberRole') ?? '').trim()
+        edit.addMembers = [role === '' ? { name } : { name, role }]
+      } else if (intent === 'addTask') {
+        const subject = String(data.get('taskSubject') ?? '').trim()
+        if (subject === '') throw new Error('新任务需要一个标题')
+        edit.addTasks = [{ subject }]
+      } else return
+      await api(`/dsh-flow/map-api/teams/${teamId}/plan`, { method: 'POST', body: JSON.stringify(edit) })
+    }
+    state.error = ''
+    // Pull once instead of waiting for the next tick: the plan the reader just
+    // changed should be the plan they see, and a form that redraws unchanged for
+    // a second after a successful edit reads as a failed one.
+    await pollTeams()
+    render()
+  } catch (error) {
+    setError(error)
+  }
+}
+
 /**
  * Fetch one task's attempt history and remember it.
  *
@@ -358,4 +407,5 @@ app.addEventListener('input', event => {
 app.addEventListener('submit', event => {
   const form = event.target
   if (form instanceof HTMLFormElement && form.matches('[data-draft]')) { event.preventDefault(); void submitDraft() }
+  if (form instanceof HTMLFormElement && form.matches('[data-form="plan-edit"]')) { event.preventDefault(); void submitPlanEdit(form) }
 })

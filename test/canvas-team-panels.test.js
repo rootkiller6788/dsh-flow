@@ -17,7 +17,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  attemptTimelineHtml, clockOf, coverageHtml, deliveryHtml, loopHtml, qualityPanelHtml, taskStateLabel,
+  attemptTimelineHtml, clockOf, coverageHtml, deliveryHtml, loopHtml, qualityPanelHtml, stagedPlanHtml, taskStateLabel,
 } from '../src/canvas/team-panels.js'
 
 test('a task display state gets a label, and an unknown one is shown as itself', () => {
@@ -166,6 +166,61 @@ test('a timeline escapes what the log recorded', () => {
   })
   assert.doesNotMatch(html, /<script>/)
   assert.match(html, /&lt;script&gt;/)
+})
+
+// --- the staged-plan editor ------------------------------------------------
+
+const staged = extra => ({
+  teamId: 'T', phase: 'staged', writable: true,
+  members: [{ name: '建模手', role: 'scientist' }, { name: '程序员' }],
+  tasks: [{ id: 't1', subject: 'pin it', dependencies: [] }, { id: 't2', subject: 'build it', dependencies: ['t1'] }],
+  ...extra,
+})
+
+test('the editor appears only where editing is meaningful', () => {
+  // A running team's task list is the record of what is happening — the same
+  // controls there would rewrite it underneath members holding attempts. And an
+  // imported `.agent-teams/` team is somebody else's record to begin with.
+  assert.notEqual(stagedPlanHtml(staged()), '')
+  assert.equal(stagedPlanHtml(staged({ phase: 'running' })), '')
+  assert.equal(stagedPlanHtml(staged({ writable: false })), '', 'a read-only source cannot be edited from here')
+  assert.equal(stagedPlanHtml(undefined), '')
+})
+
+test('every control carries the request it makes', () => {
+  // The buttons report *which one was pressed* through their own name/value, so
+  // the panel never has to remember a pending intent across a re-render — which
+  // matters because `render()` replaces the whole document every frame.
+  const html = stagedPlanHtml(staged())
+  assert.match(html, /data-form="plan-edit"/)
+  assert.match(html, /data-team="T"/)
+  assert.match(html, /name="removeMember" value="建模手"/)
+  assert.match(html, /name="removeTask" value="t2"/)
+  assert.match(html, /name="intent" value="addMember"/)
+  assert.match(html, /name="intent" value="addTask"/)
+  assert.match(html, /name="intent" value="approve"/)
+})
+
+test('the plan shows what will be started, including what it waits on', () => {
+  const html = stagedPlanHtml(staged())
+  assert.match(html, /建模手/)
+  assert.match(html, /scientist/)
+  assert.match(html, /pin it/)
+  assert.match(html, /依赖 t1/, 'a dependency is visible before it is approved, not after')
+})
+
+test('an empty roster or task list says so rather than showing nothing', () => {
+  // An approved plan with an empty roster starts nothing and would otherwise
+  // look perfectly fine.
+  const html = stagedPlanHtml(staged({ members: [], tasks: [] }))
+  assert.match(html, /还没有成员/)
+  assert.match(html, /还没有任务/)
+})
+
+test('the editor escapes names that came from a model', () => {
+  const html = stagedPlanHtml(staged({ members: [{ name: '"><img src=x>' }], tasks: [] }))
+  assert.doesNotMatch(html, /<img/)
+  assert.match(html, /&quot;&gt;&lt;img/)
 })
 
 test('the three sections compose, and any of them may be absent', () => {

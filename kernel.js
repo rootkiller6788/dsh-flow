@@ -212,6 +212,28 @@ export function installFlowKernel(ctx, config = {}) {
   ctx.provide?.('flowTeamSources', sources)
   ctx.provide?.('flowRunner', runner)
 
+  // Nothing here writes session events, and that is a finding rather than an
+  // omission. The obvious next surface after the three services would be a
+  // `dsh-flow/*` session-event family, and the host does not admit one:
+  //
+  //   · `SessionEventMap` is the appendable vocabulary, and the generated
+  //     `KNOWN_SESSION_EVENT_TYPES` covers "every member declared in this
+  //     repository" — downstream plugin events are, in its own words, "outside
+  //     this list by construction", with the registration surface "deferred
+  //     until such a consumer exists".
+  //   · `Session.append(type, data)` takes a third argument only for surface
+  //     events, and there is no way to set the envelope's `ignorable` marker.
+  //     Without that marker an unrecognized type is *required*, so a reader
+  //     refuses to reconstruct the whole session around it.
+  //
+  // So a dsh-flow event would either be dropped on write or break the log it
+  // landed in. agent-teams carries such an emitter guarded by
+  // `KNOWN_SESSION_EVENT_TYPES`; that guard is true of every out-of-repo type,
+  // so in practice those events never fire.
+  //
+  // What dsh-flow offers instead is the channel that actually works, and it is
+  // the one its own canvas reads: the append-only team log under `<stateDir>`,
+  // projected at `GET /dsh-flow/map-api/teams`.
   return { store, profiles, runner, tools, retired, sources, stateDir, runnerName }
 }
 

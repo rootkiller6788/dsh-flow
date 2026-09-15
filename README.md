@@ -142,6 +142,16 @@ dsh-flow (纯 JS，无运行时依赖)
 `.agent-teams` 团队同时可见），而两个实例**会打架**的 seam 必须在组合期定死
 （`flowRunner`：两个调度器会抢同一个任务）。
 
+**团队活动怎么被观察：走自己的通道，不发会话事件。** 事实源是
+`<stateDir>/<teamId>/events.jsonl`（append-only 事件日志），投影成
+`GET /dsh-flow/map-api/teams` 供画布读取。
+
+不往会话里写 `dsh-flow/*` 事件，是因为宿主不接纳：`KNOWN_SESSION_EVENT_TYPES`
+是构建期生成的封闭集合，其注释明说下游插件的事件"按构造不在其中"、注册面"推迟到
+真有消费者时"；而 `Session.append` 不给设信封的 `ignorable` 标记——缺了它，一个
+不认识的类型会被当作**必需**，读取端宁可拒绝重建**整个会话**。所以那样的事件只会
+被丢弃，或者破坏它落进去的那份日志。完整推演见 `kernel.js` 末尾那段注释。
+
 ## 参考
 
 ### HTTP 路由

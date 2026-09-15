@@ -74,13 +74,27 @@ function writeTeam(record) {
   return dir
 }
 
-/** The real 4-member team measured during the audit, when it is on this machine. */
+/**
+ * A real team record, when one is pointed at.
+ *
+ * A corpus of synthetic teams cannot cover the shapes a real one has — the
+ * fields a model filled in, the CJK member names, the `acceptance` list that
+ * actually has entries. So a real `team.json` is used as an extra input, and it
+ * is supplied by path rather than looked for: a default location would be one
+ * machine's directory layout baked into a repository.
+ *
+ *   DSH_FLOW_DIFF_TEAM=/path/to/team.json node scripts/diff-agent-teams.mjs
+ *
+ * @returns the parsed record, or undefined when no path was given or it is gone.
+ */
 function realTeam() {
-  const path = process.env['DSH_FLOW_DIFF_TEAM'] ?? join(
-    process.env['USERPROFILE'] ?? process.env['HOME'] ?? '.',
-    'Desktop', 'projects', 'fixture', '.agent-teams', 'fixture-team', 'team.json',
-  )
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined
+  const path = process.env['DSH_FLOW_DIFF_TEAM']
+  if (path === undefined || !existsSync(path)) return undefined
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return undefined
+  }
 }
 
 
@@ -139,7 +153,7 @@ for (const [label, a, b] of [
 {
   const real = realTeam()
   if (real === undefined) {
-    console.log('ok    coerceTeamState skipped — no real team.json on this machine')
+    console.log('ok    coerceTeamState skipped — set DSH_FLOW_DIFF_TEAM to a real team.json to add it')
   } else {
     // readTeamSync throws where coerceTeamState returns undefined; both mean
     // "not a usable record", so compare the verdict and, when both accept, the

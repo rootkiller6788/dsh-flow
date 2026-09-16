@@ -2,7 +2,11 @@
 
 [中文](./README_CN.md) · **English**
 
-Adds a **unified agent canvas** tab to DeepSeek Harness: the session timeline and the multi-agent team hierarchy share one figure — the user's requirement turns stay on the main timeline, the team grows below them as a nested region, each member gets a sub-region holding their tasks and speech cards. Character artwork, a dialogue chain woven by speaker, and the task dependency DAG all read at a glance.
+What stalls long or complex work is usually not "not enough tools". It is that the executor cannot be swapped, the state has no source of truth, and the boundaries have no assertions — a task that has run for hours crashes once and cannot say how far it got; changing how work is executed means changing the core, and so does adding a kind of team source.
+
+dsh-flow solves all three at the level of **kernel shape**: `rules/` is a pure core (no IO, no `ctx`), execution and sources are **declared seams**, and `kernel.js` is the single composition root that decides which implementation this deployment attaches.
+
+It and [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams) are **two kernel shapes**: the same capability surface, the opposite internal shape. That opposition is where this document starts.
 
 ![Agent canvas: requirement timeline + team hierarchy + artwork inspector](assets/1.png)
 
@@ -14,11 +18,84 @@ Adds a **unified agent canvas** tab to DeepSeek Harness: the session timeline an
   <img src="https://img.shields.io/badge/build%20step-none-f0ad4e?style=flat-square" alt="no build step">
 </p>
 
-## In one line
+## Two kernel shapes
 
-**A requirement → raise an agent team → the canvas draws this figure**: dialogue is laid out by speaker, tasks are wired by dependency, and the data lives in dsh-flow's own storage.
+In the host's own words, the difference is **whether a plugin divides its own internals into services**. The host frames this as "everything is a plugin" and "Plugins, not loop changes", which in code comes down to the `core` / `seam` split:
 
-It **fully replaces [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)**: the 13 tools map one to one, and 31 differential checks guard that line. But it does not depend on the other plugin — if that plugin is installed it is an optional read-only source, and if it is not, everything still runs. For what differs in use, see the [comparison](#comparison-with-dsh-agent-teams).
+| Usual phrasing | The host's own terms | The evidence |
+| --- | --- | --- |
+| **microkernel** | Keep `core` as small as possible and hang every capability off a **declared seam**; new behaviour goes on an extension point rather than into `core` | dsh-flow: a `rules/` pure core (no IO, no `ctx`) + three services + one composition root |
+| **monolithic kernel** | No seam; the capabilities all live inside `core` | dsh-agent-teams: `src/` is one flat plane (17 TS modules + 13 under `client/`), importing each other freely, with no mechanism asserting module boundaries |
+
+A seam comprises three roles — **Service Definition / Provider / Consumer** — and is only complete with all three. In dsh-flow they line up plainly: `runner/interface.js` is the definition, `manual.js` and `subagents.js` are the two Providers, and `tools/` is the Consumer.
+
+**Both are DSH plugins**, and both attach to seams the host provides — the difference is whether the plugin has seams of its own. Once the functionality is split into core and seam, "add another way to execute" is adding a Provider and "add another kind of team source" is one `register()` call; on a flat `src/`, that work is changing the core.
+
+So this is an **opposition, not an absorption**: the capability surfaces can be aligned (the 13 tools map one to one to `agent_teams_*`, and the 31 differential checks in `pnpm test:diff` guard that line), but the two kernel shapes cannot give the same set of guarantees.
+
+### What it is like to use
+
+| | dsh-flow | dsh-agent-teams |
+| --- | --- | --- |
+| Install | Clone it and it runs, **nothing to install** | Pulls a whole dependency tree (24 peers, including React 18) |
+| Host upgrade | Declares no host version; probes capabilities at runtime and takes a fallback branch when it cannot | Pins 4 host versions in its peers; outside those it will not work |
+| Change one canvas line | Save → **refresh the page** (0 builds, 0 restarts) | Rebuild the client bundle → **restart the host** |
+| Stop execution, keep the view | `runner: manual` — look and edit, nothing runs | No equivalent switch |
+| How a task's attempts went | Click a task row for the **attempt timeline**: how each attempt ended, which was rolled back | A monotonic attempt counter that cannot say how any one ended |
+| Unreadable lines | Go into the **import report**, listed with **line numbers** on the canvas | — |
+| Teams that cannot reach the canvas | Counted in the toolbar; they do not vanish silently | — |
+| Approving a plan | Edit and approve directly on the canvas, through the same validation `flow_edit_plan` / `flow_approve` use | Panel editing |
+| The canvas | Session timeline and team hierarchy **in one figure** (the team nests under the requirement turns) | A team tree panel |
+| Uninstalling the other plugin | Everything keeps working — there was never a second record | — |
+
+What you can "feel" in the table above all comes from the architecture: **a change takes effect on refresh** because canvas modules are served over HTTP individually (`src/**` invalidated by mtime + ETag revalidation), with no bundle step; **`runner: manual` exists** because execution is a seam, fixed at composition time; and **uninstalling the other plugin changes nothing** because team records are this plugin's own append-only log, with the other plugin only an entry in the source registry. Changing `client.js` (the tab registration layer) still requires a host restart on both sides — that layer really does go into the host's client bundle.
+
+### Measurements
+
+All of these are this repository's own numbers, reproducible with one command:
+
+| Item | Number |
+| --- | --- |
+| Cost of the plugin on the host's startup path (`import './index.js'`) | **4.3 ms** |
+| Composition root assembly (`import './kernel.js'`, cold) | 33 ms |
+| A change to `src/canvas/**` taking effect | **0 builds, 0 restarts** |
+| Canvas first paint | 41 requests / 449 KB; every request afterwards revalidates by ETag, so unchanged files are a 304 |
+| The layer-boundary gate (107 modules parsed + 7 layers asserted + serve allowlist) | 4.0 s |
+| All 434 tests | 1.1 s |
+
+### Why there is no "N times faster" here
+
+A cross-implementation performance comparison requires **both sides to run on this machine**. dsh-agent-teams' full pipeline does not: it has no `node_modules` and no `lib/` (its published artifact), and its `snapshot.ts` imports host runtime packages directly (`@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-agent`). Replacing those with stubs and then timing measures the stubs, not it. Its state-reading layer (`src/state.ts`) depends only on Node builtins and could in principle run directly under Node 24, but that is another repository's code, and running it needs your explicit consent.
+
+So any "N times faster" in this repository would be invented. What can be given is the kind of difference above — **confirmable without running anything** — plus my own reproducible measurements.
+
+## Long-running work
+
+The longer it runs, the more two things matter: a crash that cannot say how far it got, and a state that forks without telling you.
+
+- **The source of truth is an append-only `events.jsonl`; `state.json` is only one reading of it.** When the two disagree the log wins, and the disagreement is judged an error by `teamDiffEvents` rather than quietly smoothed over — reconciliation **refuses** a difference it cannot express instead of picking a winner. The longer it runs the likelier state forks, and silently picking a winner is how errors accumulate.
+- **How many times a task was tried, how each ended, which was rolled back** — click a task row for the **attempt timeline**. This information exists only at the protocol layer: a monotonic attempt counter cannot say how any single attempt ended.
+- **A line that cannot be read never stops parsing**, but it does go into the import report, listed on the canvas with its **line number** (kind / member / line / reason). The line number is the only thing that makes a file that ran itself damaged fixable.
+- **If it runs away you can keep the view and stop the work**: `runner: manual` lets you look and edit while nothing executes. This is a **composition-time** choice, not runtime hot-swapping — saying that plainly is better than keeping a fake switch.
+- **The boundary is written down**: the team store and `workspaces.json` are both **single-writer**, the cross-process lock is advisory, and two open copies can still overwrite each other.
+
+## Complex work
+
+Complex work breaks between judgements: what the canvas shows is not what the captain decided on, editing and approval each judge once, and during a migration two sets of records fight.
+
+- **The judgements live in the pure core, so the canvas and the model see the same one.** K9 verdict / K10 blockers / K11 coverage matrix are carried out in the snapshot, the **same computation** the model sees when it calls `flow_status` — so the conclusion you read off the canvas cannot drift from the conclusion the captain decided on.
+- **One figure holds the hierarchy**: the user's requirement turns stay on the main timeline, the team grows below them as a nested region, each member gets a sub-region holding their task chips (wired by dependency depth) and speech cards (laid out in time order). Assignment is expressed by containment, dependency by arrows, dialogue flow by the turn chain crossing regions.
+- **Editing and approval happen on the canvas, but are judged once**: a staged team's inspector edits tasks / members and their dependencies and approves them, going through the **same** `applyTeamEdits` / `applyTeamApproval` as `flow_edit_plan` / `flow_approve` — the K8 gate judges once, and the canvas is not a back door around the tool layer.
+- **During a migration both sets of teams are visible**: the source registry lists this deployment's log alongside `.agent-teams`, so switching over is one config line rather than a big-bang move.
+- **The pure core touches neither IO nor `ctx`**: the 25 modules under `rules/` import under plain Node, and the 434 tests run in 1.1 s — that the judgements can be tested exhaustively is the precondition for carrying complex rules.
+
+## Extension
+
+- **Another way to execute = another Provider**: `runner/interface.js` defines the seam, `manual.js` / `subagents.js` are its two Providers. Neither the core nor the tools change.
+- **Another kind of team source = one `register()`**: `ctx.flowTeamSources` is a registry, because the implementations genuinely coexist.
+- **Boundaries are expressed by directories and asserted layer by layer by the gate**: seven layers, every invariant asserted in `pnpm run build` (the pure core may not touch IO or `ctx`, the canvas may not touch `node:` or any host layer, host layers may not enter the serve allowlist, dependencies must point inward only). A boundary nobody asserts decays over time, and what is left is just a directory that happens to sit there.
+- **Changing one canvas line: save → refresh the page.** There is no build step; `src/**` is invalidated by mtime + ETag revalidation.
+- **Zero runtime dependencies**: `files` lists `.js` rather than `lib/`, so cloning it is enough to run it — there is no "compile first" step.
 
 ## Quick start
 
@@ -52,8 +129,8 @@ agent-teams (or the host) relays member messages into the host session inside an
 
 Click a team's title bar or a member sub-region and the right pane shows the **whole arrangement**: member artwork rows (avatar + role + model + progress + current activity), the task dependency list (state chips), the captain's mailbox (real member → captain messages), plus three judgement panels:
 
-- **K9 verdict / K10 blockers / K11 coverage matrix** — the same computation the model sees when it calls `flow_status`, so what you read off the canvas cannot drift from what the captain decided on
-- **Click a task row** to expand that task's **attempt timeline**: how many times it was tried, how each attempt ended, which one was rolled back (this information exists only at the protocol layer — a monotonic attempt counter cannot say how any single attempt ended)
+- **K9 verdict / K10 blockers / K11 coverage matrix** — the **same computation** the model sees when it calls `flow_status`, so what you read off the canvas cannot drift from what the captain decided on
+- **Click a task row** to expand that task's **attempt timeline**: how many times it was tried, how each attempt ended, which one was rolled back
 - **Staged teams** are **editable and approvable right in the inspector**, through the same validation `flow_edit_plan` / `flow_approve` use
 
 When team data contains lines that cannot be read, the team's card grows a `数据损坏 N` badge and the inspector lists each one with its **kind / member / line number / reason** — the line number is the only thing that makes a damaged file fixable. Teams that cannot reach the canvas at all are covered by a deployment-wide count in the toolbar; otherwise they simply would not exist on the canvas.
@@ -75,7 +152,7 @@ Team structure (members / tasks / dependencies / mailboxes) **lives in dsh-flow'
     └── mail/          # one .jsonl mailbox per member
 ```
 
-**The log is the fact; the checkpoint is a cache.** When the two disagree the log wins, and the disagreement is judged an error by `teamDiffEvents` rather than quietly smoothed over — reconciliation **refuses** a difference it cannot express instead of picking a winner. A line that cannot be read never stops parsing, but it does go into the import report (below).
+**The log is the fact; the checkpoint is a cache.** When the two disagree the log wins, and the disagreement is judged an error by `teamDiffEvents` rather than quietly smoothed over — reconciliation **refuses** a difference it cannot express instead of picking a winner. A line that cannot be read never stops parsing, but it does go into the import report.
 
 Where teams come from is a **source registry** (`ctx.flowTeamSources`): this deployment's own log is always registered, and when a `.agent-teams/` exists it is listed at the same time as a **read-only source**. During a migration you see both sets, so switching over is one config line rather than a big-bang move (a source whose `canAppend` is false cannot be edited from the canvas).
 
@@ -207,59 +284,6 @@ Three rules break most quietly, and the gate handles each explicitly: a canvas m
 **How team activity is observed: through its own channel, without emitting session events.** The source of truth is `<stateDir>/<teamId>/events.jsonl` (an append-only event log), projected to `GET /dsh-flow/map-api/teams` for the canvas to read.
 
 No `dsh-flow/*` event is written into the session because the host does not accept one: `KNOWN_SESSION_EVENT_TYPES` is a closed set generated at build time, whose comment states outright that a downstream plugin's events are "outside this list by construction" and that the registration surface is "deferred until there is a real consumer"; and `Session.append` offers no way to set the envelope's `ignorable` flag — without it an unrecognised type is treated as **required**, and the reader would rather refuse to reconstruct **the entire session**. So such an event would either be dropped or damage the log it landed in. The full argument is in the comment at the end of `kernel.js`.
-
-## Comparison with dsh-agent-teams
-
-In the host's own words, the difference is **whether a plugin divides its own internals into services**. The host frames this as "everything is a plugin" and "Plugins, not loop changes", which in code comes down to the `core` / `seam` split:
-
-| Usual phrasing | The host's own terms | The evidence |
-| --- | --- | --- |
-| **microkernel** | Keep `core` as small as possible and hang every capability off a **declared seam**; new behaviour goes on an extension point rather than into `core` | dsh-flow: a `rules/` pure core (no IO, no `ctx`) + three services + one composition root |
-| **monolithic kernel** | No seam; the capabilities all live inside `core` | dsh-agent-teams: `src/` is one flat plane (17 TS modules + 13 under `client/`), importing each other freely, with no mechanism asserting module boundaries |
-
-A seam comprises three roles — **Service Definition / Provider / Consumer** — and is only complete with all three. In dsh-flow they line up plainly: `runner/interface.js` is the definition, `manual.js` and `subagents.js` are the two Providers, and `tools/` is the Consumer.
-
-**Both are DSH plugins**, and both attach to seams the host provides — the difference is whether the plugin has seams of its own. Once the functionality is split into core and seam, "add another way to execute" is adding a Provider and "add another kind of team source" is one `register()` call; on a flat `src/`, that work is changing the core.
-
-dsh-flow's goal is to **fully replace** [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams): everything it can do, this can do — but without depending on it. If it is installed, it is an optional read-only source; if it is not, everything still runs.
-
-The capability surface is aligned: the 13 tools map one to one to `agent_teams_*`, and the 31 differential checks in `pnpm test:diff` guard that line (same functions fed the same inputs, conclusions compared one by one). **What differs is what it is like to use:**
-
-### What it is like to use
-
-| | dsh-flow | dsh-agent-teams |
-| --- | --- | --- |
-| Install | Clone it and it runs, **nothing to install** | Pulls a whole dependency tree (24 peers, including React 18) |
-| Host upgrade | Declares no host version; probes capabilities at runtime and takes a fallback branch when it cannot | Pins 4 host versions in its peers; outside those it will not work |
-| Change one canvas line | Save → **refresh the page** (0 builds, 0 restarts) | Rebuild the client bundle → **restart the host** |
-| Stop execution, keep the view | `runner: manual` — look and edit, nothing runs | No equivalent switch |
-| How a task's attempts went | Click a task row for the **attempt timeline**: how each attempt ended, which was rolled back | A monotonic attempt counter that cannot say how any one ended |
-| Unreadable lines | Go into the **import report**, listed with **line numbers** on the canvas | — |
-| Teams that cannot reach the canvas | Counted in the toolbar; they do not vanish silently | — |
-| Approving a plan | Edit and approve directly on the canvas, through the same validation `flow_edit_plan` / `flow_approve` use | Panel editing |
-| The canvas | Session timeline and team hierarchy **in one figure** (the team nests under the requirement turns) | A team tree panel |
-| Uninstalling the other plugin | Everything keeps working — there was never a second record | — |
-
-What you can "feel" in the table above all comes from the architecture: **a change takes effect on refresh** because canvas modules are served over HTTP individually (`src/**` invalidated by mtime + ETag revalidation), with no bundle step; **`runner: manual` exists** because execution is a seam, fixed at composition time; and **uninstalling the other plugin changes nothing** because team records are this plugin's own append-only log, with the other plugin only an entry in the source registry. Changing `client.js` (the tab registration layer) still requires a host restart on both sides — that layer really does go into the host's client bundle.
-
-### Measurements
-
-All of these are this repository's own numbers, reproducible with one command:
-
-| Item | Number |
-| --- | --- |
-| Cost of the plugin on the host's startup path (`import './index.js'`) | **4.3 ms** |
-| Composition root assembly (`import './kernel.js'`, cold) | 33 ms |
-| A change to `src/canvas/**` taking effect | **0 builds, 0 restarts** |
-| Canvas first paint | 41 requests / 449 KB; every request afterwards revalidates by ETag, so unchanged files are a 304 |
-| The layer-boundary gate (107 modules parsed + 7 layers asserted + serve allowlist) | 4.0 s |
-| All 434 tests | 1.1 s |
-
-### Why there is no "N times faster" here
-
-A cross-implementation performance comparison requires **both sides to run on this machine**. dsh-agent-teams' full pipeline does not: it has no `node_modules` and no `lib/` (its published artifact), and its `snapshot.ts` imports host runtime packages directly (`@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-agent`). Replacing those with stubs and then timing measures the stubs, not it. Its state-reading layer (`src/state.ts`) depends only on Node builtins and could in principle run directly under Node 24, but that is another repository's code, and running it needs your explicit consent.
-
-So any "N times faster" in this repository would be invented. What can be given is the kind of difference above — **confirmable without running anything** — plus my own reproducible measurements.
 
 ## Reference
 

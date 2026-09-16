@@ -8,11 +8,15 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B7285?style=flat-square" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Node.js-%3E%3D22.19.0-3c873a?style=flat-square" alt="Node.js >= 22.19.0">
   <img src="https://img.shields.io/badge/DSH-web%20profile-5B4CF0?style=flat-square" alt="DSH web profile">
+  <img src="https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%97%B6%E4%BE%9D%E8%B5%96-0-2ea44f?style=flat-square" alt="zero runtime dependencies">
+  <img src="https://img.shields.io/badge/%E6%9E%84%E5%BB%BA%E6%AD%A5-%E6%97%A0-f0ad4e?style=flat-square" alt="no build step">
 </p>
 
 ## 一句话
 
 **需求 → 拉起智能体团队 → 画布自动生成这张图**：对话按说话者分层编排，任务按依赖连线，数据存在 dsh-flow 自己的存储里。
+
+它**完整替代 [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)**：13 个工具一一对应，31 项差分守着这条线；但它不依赖对方——装了对方是可选的只读来源，没装照常跑完。工程形态上的差别见[对照](#与-dsh-agent-teams-的对照)。
 
 ## 快速开始
 
@@ -34,7 +38,7 @@ dsh web
 | 节点 | 画的是什么 | 数据源 |
 | --- | --- | --- |
 | **会话轮次卡** | 一轮对话（提问 + 回答），按 DSH 原生 fork 关系连成分支树，可追问 / 分支 / 归档；成员中继与子代理通知等**智能体事件轮**以派生标签呈现（`论文手 → 队长`），不暴露协议原文 | 宿主 `sessions` + `workspaces` 服务，投影落盘到 `flow/workspaces.json` |
-| **团队层级区域** | 团队标题条下嵌套**成员子区域**：每个成员一格，装着ta的任务 chip（按依赖深度连线）与发言卡（按时间排布）。指派关系由包含表达，依赖用箭头，对话流向由跨区域的轮次链表达 | 团队数据**存放在 dsh-flow 自己的存储**（`flow/teams.json` 快照）；安装了 agent-teams 时自动跟随其实时状态并刷新快照 |
+| **团队层级区域** | 团队标题条下嵌套**成员子区域**：每个成员一格，装着ta的任务 chip（按依赖深度连线）与发言卡（按时间排布）。指派关系由包含表达，依赖用箭头，对话流向由跨区域的轮次链表达 | 团队数据**存放在 dsh-flow 自己的存储**（`<stateDir>/<teamId>/events.jsonl`）；部署里有 `.agent-teams/` 时它作为**只读来源**一并列出 |
 
 ### 多智能体对话
 
@@ -44,7 +48,20 @@ agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【
 
 ### 团队检查器
 
-点团队标题条或成员子区域，右栏呈现**整体编排**：成员立绘行（头像 + 角色 + 模型 + 进度）、任务依赖列表（状态 chip）、队长收件箱（成员 → 队长的真实消息）。
+点团队标题条或成员子区域，右栏呈现**整体编排**：成员立绘行（头像 + 角色 + 模型 + 进度
++ 此刻的活动状态）、任务依赖列表（状态 chip）、队长收件箱（成员 → 队长的真实消息），
+以及三块判据面板：
+
+- **K9 判词 / K10 blockers / K11 覆盖矩阵** —— 与模型调 `flow_status` 时看到的是同一份
+  计算，所以画布上读到的结论和队长做决定时依据的结论不会分叉
+- **点任务行**展开该任务的 **attempt 时间线**：一次任务试过几次、每次都怎么了、哪次被
+  回滚（这是协议层才有的信息，单调的 attempt 计数器说不出每一次的结局）
+- **staged 团队**的检查器可**直接编辑并批准**，与 `flow_edit_plan` / `flow_approve`
+  走同一份校验
+
+团队数据有读不出来的行时，团队卡上出现 `数据损坏 N` 徽章，检查器里逐条列出**种类 /
+成员 / 行号 / 原因** —— 行号是让坏文件可修的唯一东西。进不了画布的团队由工具栏的
+全局计数兜住，否则它在画布上根本不存在。
 
 ### 立绘系统
 
@@ -52,11 +69,24 @@ agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【
 
 ## 团队数据的归属
 
-团队结构（成员 / 任务 / 依赖 / 收件箱）**存放在 dsh-flow 自己的存储**：`flow/teams.json` 快照，由画布在拉取成功时自动镜像。渲染优先级：
+团队结构（成员 / 任务 / 依赖 / 收件箱）**存放在 dsh-flow 自己的存储**，按团队分目录：
 
-1. 安装了 agent-teams → 使用其实时状态并刷新快照
-2. 未安装 / 离线 → 使用自己的快照渲染（历史冻结）
-3. 两者都无 → 纯对话时间轴
+```
+<stateDir>/            # 默认 .dsh-flow
+└── <teamId>/
+    ├── events.jsonl   # append-only 事实源 —— 团队做过什么，全在这里
+    ├── state.json     # 检查点：events.jsonl 的一次读法，可以丢掉再重建
+    ├── manifest.json  # 创建时间、初始目标一类的元信息
+    └── mail/          # 每个成员一个 .jsonl 收件箱
+```
+
+**日志是事实，检查点是缓存。** 两者对不上时以日志为准，并且这次不一致会被
+`teamDiffEvents` 判为错误而不是悄悄抹平 —— 对账**拒绝**表达不出来的差异，而不是
+挑一个赢家。读不出来的行不会中断解析，但会进导入报告（见下）。
+
+团队从哪来是一个**来源注册表**（`ctx.flowTeamSources`）：本部署的日志永远在册；
+部署里存在 `.agent-teams/` 时，它作为一个**只读来源**同时列出。迁移期两边都看得见，
+所以换过来是一条配置而不是一次性大搬家（`canAppend` 为假的来源不能从画布改）。
 
 对话编织本身来自**对话投影的中继解析**，不依赖任何外部插件。
 
@@ -84,41 +114,95 @@ agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【
         autoProjection: true
         projectionWorkspaceTitle: DSH 任务
         trustedHosts: []
+
+        stateDir: .dsh-flow        # 团队住在哪
+        runner: subagents          # manual | subagents（组合期定死）
+        memberProvider: spawn
+        maxMembers: 8
+        # agentTeamsStateDir: .agent-teams   # 迁移期才打开
+        # profiles: {...}                     # 见下
 ```
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `dataFile` | `dshHomePath('flow/workspaces.json')` | 画布图与团队快照（`teams.json` 同目录）的持久化路径，**必填** |
+| `dataFile` | `dshHomePath('flow/workspaces.json')` | 画布图的持久化路径，**必填** |
 | `autoProjection` | `true` | 是否自动把 DSH 会话投影到画布（监听 `session/created` 与 `session/event`） |
 | `projectionWorkspaceTitle` | `DSH 任务` | 无法从 cwd 推出工作区名时的回退标题 |
 | `trustedHosts` | `[]` | 额外放行的 Host 头（`localhost` 与 `127.0.0.1` 始终放行） |
+| `stateDir` | `.dsh-flow` | 团队日志与收件箱的根目录；相对路径按会话工作目录解析，这让两个部署的团队互不串门 |
+| `runner` | `subagents` | **组合期二选一**：`subagents` 是真内核，`manual` 表示"能看能改但不执行" |
+| `memberProvider` | `spawn` | 成员用哪个 subagent provider 启动 |
+| `agentTeamsStateDir` | 无 | 给出则把该 `.agent-teams` 目录注册成**只读来源**；迁移期两边团队同时可见，`flow_*` 工具仍只操作我们自己的 |
+| `maxMembers` | — | profile 名册与它们产出的团队的成员上限 |
+| `profiles` | 无 | 团队 profile 表：命名名册 + 种子任务 + 评审策略 |
+
+`profiles` 是**部署配置而不是协议**——一个部署提供哪些团队是它自己的事，所以它住在
+config 里而不住在代码里。每个 profile 的 `taskPlanning` 只有两种取值：`seed`（下面的
+任务定义整张图）或 `captain`（给名册，图由队长设计）。名册里给出的 `role` /
+`reasoning_effort` 决定成员的默认路由。
 
 `/dsh-flow` 路由不在 DSH `/api` 的浏览器信任围栏内，所以插件自己校验 `Host` 头以防 DNS rebinding；换非本机地址访问时把主机名加进 `trustedHosts`。
 
 ## 架构
 
-单包、零运行时依赖、无构建。边界由目录表达，由 `pnpm run build` **逐层断言** ——
-一条没有断言的边界会随时间消失，剩下的只是一个碰巧这么放的目录。
+单包、零运行时依赖、无构建。**源码就是产物**：`files` 里是 `.js` 而不是 `lib/`，
+克隆下来就能跑，没有一步"先编译"。
+
+宿主的设计哲学是 everything is a plugin，服务按 `core` / `seam` / `bundle` 分类。
+dsh-flow 用同一套划分自己：**一个纯核、两个 seam、一个组合根**。
+
+### 三个服务
+
+| 服务 | 分类 | 形态 | 为什么必须是这种形态 |
+| --- | --- | --- | --- |
+| `ctx.flowTeams` | core | 单例 | 本部署只有一份团队记录，别的插件是它的消费者 |
+| `ctx.flowTeamSources` | seam | **注册表** | 实现真的共存：迁移期原生团队与 `.agent-teams` 团队要同时可见 |
+| `ctx.flowRunner` | seam | **组合期二选一** | 两个实例会打架：两个调度器会抢同一个任务 |
+
+一个名字只能有一个 provider（同名第二次 `ctx.provide` 直接抛错），所以上面这个区别
+不是风格选择，是硬约束 —— 共存的做成注册表，互斥的必须在组合期定死。
+
+`kernel.js` 是组合根：唯一一处把 store / runner / tools 摆在一起的地方。它不实现任何
+能力，只决定这次部署用哪个实现、把它们接到哪些 seam 上。
+
+### 七层，每层的不变量都在门里断言
+
+边界由目录表达，由 `pnpm run build` **逐层断言** —— 一条没有断言的边界会随时间消失，
+剩下的只是一个碰巧这么放的目录。
+
+| 层 | 模块 | 门里断言的不变量 |
+| --- | --- | --- |
+| `rules/` | 25 | 纯核：不许 `node:`，不许出现 `ctx` —— 普通 Node 就能 import |
+| `canvas/` | 12 | 浏览器侧：不许 `node:`；**只许读纯核**，import 任何 host 层都算越界 |
+| `store/` | 5 | host 侧：**不许进 serve 白名单**（进了就是把它发给浏览器） |
+| `sources/` | 3 | 同上 |
+| `runner/` | 11 | 同上 |
+| `tools/` | 8 | 同上 |
+| `config/` | 2 | 同上 |
+| *所有层* | — | 依赖**只指向内侧**；**没有任何模块可以 import `canvas/`**（它是叶子，不是库） |
 
 ```
 dsh-flow (纯 JS，无运行时依赖)
 ├── src/
-│   ├── rules/          # 纯核：K1–K14 + 事件协议 + 投影 + 对账（library，无 ctx）
-│   ├── store/          # 团队注册表 + append-only 日志 + 收件箱 + 快照投影
+│   ├── rules/          # 25 个 —— 纯核：K1–K14 + 事件协议 + 投影 + 对账（无 IO，无 ctx）
+│   │                   #   entities / gates / project / reconcile / coverage / delivery …
+│   ├── store/          #  5 个 —— 团队注册表 + append-only 日志 + 收件箱 + 快照 + 导入报告
 │   │                   #   → ctx.flowTeams（core）
-│   ├── sources/        # 团队来源注册表：本部署的日志 / 导入的 .agent-teams（只读）
+│   ├── sources/        #  3 个 —— 团队来源注册表：本部署的日志 / 导入的 .agent-teams（只读）
 │   │                   #   → ctx.flowTeamSources（seam，注册表形态）
-│   ├── runner/         # 执行 seam：interface.js 定义它，manual / subagents 两个实现
+│   ├── runner/         # 11 个 —— 执行 seam：interface.js 定义它，manual / subagents 两个实现
 │   │                   #   → ctx.flowRunner（seam，组合期二选一）
-│   ├── tools/          # 13 个 flow_* 工具
-│   ├── config/         # 部署配置：profile 表 + 两个把配置变成事件的 hook
-│   └── canvas/         # 统一画布页面（浏览器侧，唯一会被 HTTP 服务的一层）
+│   ├── tools/          #  8 个 —— 13 个 flow_* 工具的注册与实现
+│   ├── config/         #  2 个 —— 部署配置：profile 表 + 两个把配置变成事件的 hook
+│   └── canvas/         # 12 个 —— 统一画布页面（唯一会被 HTTP 服务的一层）
 │       ├── canvas.js   #   入口：宿主桥、实时回复、轮询、启动
 │       ├── core.js     #   共享状态、几何常量、localStorage、宿主桥接、成员配色
+│       ├── html.js     #   转义等纯工具（拆出来是为了让面板模块可在 Node 下测）
 │       ├── markdown.js #   Markdown 渲染（含 ■ 分节规范化）
 │       ├── relay.js    #   智能体信封解析（中继/成员消息/子代理通知）
 │       ├── session.js  #   会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
 │       ├── teams.js    #   团队轮询（实时→快照回退）+ 层级区域布局
+│       ├── team-panels.js # 团队面板的纯渲染（K9/K10/K11、attempt 时间线、坏行）
 │       ├── scene.js    #   场景装配：需求时间轴 + 嵌套区域 + 类型化连线
 │       ├── view.js     #   相机、虚拟化挂载、节点渲染、检查器、主渲染
 │       ├── artwork.js  #   立绘映射（角色关键词 → 职业图，状态 → 动作图）
@@ -137,10 +221,9 @@ dsh-flow (纯 JS，无运行时依赖)
 `config` 只依赖 `rules`；`canvas` 只读 `rules`（团队数据经 HTTP 到达，不靠 import）；
 组合根依赖全部。每一条边在门里都有断言。
 
-**两条 seam 的形态不同，且这个区别是硬的。** 一个名字只能有一个 provider，所以实现
-**真的共存**的 seam 必须是注册表（`flowTeamSources`：迁移期原生团队与
-`.agent-teams` 团队同时可见），而两个实例**会打架**的 seam 必须在组合期定死
-（`flowRunner`：两个调度器会抢同一个任务）。
+三条最容易悄悄破掉的规则，门都单独管：一个画布模块 `import 'node:fs'` 在
+`pnpm test` 下**全绿**，只有浏览器会发现；一个漏进白名单的模块只有一个 404 会发现；
+一个反向 import `canvas/` 的 host 模块在 Node 下也全绿。所以这些不是约定，是断言。
 
 **团队活动怎么被观察：走自己的通道，不发会话事件。** 事实源是
 `<stateDir>/<teamId>/events.jsonl`（append-only 事件日志），投影成
@@ -151,6 +234,50 @@ dsh-flow (纯 JS，无运行时依赖)
 真有消费者时"；而 `Session.append` 不给设信封的 `ignorable` 标记——缺了它，一个
 不认识的类型会被当作**必需**，读取端宁可拒绝重建**整个会话**。所以那样的事件只会
 被丢弃，或者破坏它落进去的那份日志。完整推演见 `kernel.js` 末尾那段注释。
+
+## 与 dsh-agent-teams 的对照
+
+dsh-flow 的目标是**完整替代** [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)：
+它有的能力都要有，但**不依赖它** —— 装了它是可选的只读来源，没装照常跑完。
+
+能力面是对齐的：13 个工具与 `agent_teams_*` 一一对应，`pnpm test:diff` 的 31 项差分
+就是这条线的守卫（同名函数喂同一批输入，逐个比对结论）。**差别在工程形态**：
+
+| 参数 | dsh-flow | dsh-agent-teams |
+| --- | --- | --- |
+| 运行时依赖 | **0**（`package.json` 里没有 `dependencies` 键） | 0（宿主包靠构建期打包消化） |
+| peer 依赖 | **0**（没有 `peerDependencies` 键） | **24**（含 `react ^18.2.0`） |
+| dev 依赖 | **0** | 34 |
+| 构建步 | **无** —— `pnpm run build` 是校验门，不是编译器 | `tsc`×2 + `tsdown`，发布的是 `lib/` |
+| 源码即产物 | 是（`files` 里是 `.js`） | 否（`files` 里是 `lib/`） |
+| 前端 | 原生 DOM + 一份 `theme.css` 设计 token | React 18 + CSS Modules |
+| 宿主版本 | **不钉**：没有 `overrides`，靠运行时能力探测 + 降级分支 | **234 条 `pnpm.overrides`** 全钉 `0.1.5-rc.1`，另有 4 个版本的显式白名单 + `compatibility.json` + `doctor` |
+| 层边界断言 | **7 层 / 66 模块**，每条边都在门里断言 | 无等价机制 |
+| 测试 | 434 项 `node --test`，仓内 `test/` | 31 个独立校验脚本（5 个走 `node --test`） |
+| 工具 | 13 个 `flow_*` | 13 个 `agent_teams_*`（一一对应） |
+| 执行后端 | 2 个实现（`subagents` / `manual`），组合期二选一 | 1 个（`spawn` / `fork` 是它内部选择） |
+| 团队数据 | 自有 store：append-only `events.jsonl` + `state.json` 检查点 | `<workspace>/.agent-teams/team.json` 整体重写 |
+| 画布范围 | 会话时间轴与团队层级**同一张图**（团队嵌套在需求轮之下） | 团队树状监视器 |
+| 对外部插件的依赖 | **零**（对方是可选来源） | 零 |
+
+**这些差别为什么重要**，逐条说：
+
+- **零依赖不是洁癖，是安装面。** 装 dsh-flow 不拉任何东西，也不要求宿主版本落在某个
+  白名单里；`peerDependencies` 里的 `react` 意味着对方的画布与宿主的前端共享一个
+  React 版本，宿主升级 React 时两边要一起动。
+- **没有构建步就没有"发布的是编译产物"这一步。** 源码即产物，意味着 README、源码和
+  实际运行的是同一样东西；也意味着**不能** `import '@deepseek-ai/dsh-*'` ——
+  宿主包只能运行时 `import()` 探测，探不到就走降级分支。这是这条路上的硬代价，
+  不是免费的午餐（见 `src/runner/harness-compat.js`）。
+- **234 条 `overrides` 是维护成本的形状。** 把宿主钉死在一个 RC 上，换来的是每次
+  宿主移动都要跟着改；dsh-flow 选择探测能力而不是钉版本，代价是必须为"探不到"写出
+  一条真的能走通的路。
+- **层边界断言管的是最安静的那类错误。** 画布模块 `import 'node:fs'`、漏进 serve
+  白名单、反向依赖画布 —— 这三种在 `pnpm test` 下**全部是绿的**，只有浏览器或
+  404 会发现。有一条会在浏览器里静默失效的边界，等于没有边界。
+- **append-only 日志与整体重写是两种可恢复性。** 前者是事实源，`state.json` 只是
+  一份**可以被丢掉再重建**的读法；一条写坏的行不会让整份记录消失，它会**出现在导入
+  报告里**（见 `src/store/diagnostics.js`）。
 
 ## 参考
 
@@ -182,8 +309,16 @@ dsh-flow (纯 JS，无运行时依赖)
 | DELETE | `/map-api/threads/:id` | 删除节点**及其全部后代**，并隐藏对应 DSH 会话 |
 | POST | `/map-api/sessions/sync` | 用宿主会话列表对齐画布 `{ sessions, removedSessionIds }` |
 | POST | `/map-api/projection` | **增量读取**：`{ sessionIds, cursors }` → 只回这些会话所属的线程，且每个线程只带 `rev` 大于游标的消息；恒回 `threadIds` 供客户端剪除已归档节点 |
-| GET | `/map-api/teams` | 读取团队快照 `{ teams }`（未落盘时为空数组） |
-| POST | `/map-api/teams/snapshot` | 镜像团队状态 `{ teams }`（画布拉取成功时自动调用） |
+| GET | `/map-api/teams` | 团队快照 `{ teams, damaged }`：来源注册表里此刻可见的全部团队，每支带自己的 `warnings`（导入报告），`damaged` 是**部署级**计数 —— 连画布都进不去的团队只有这里看得见 |
+| GET | `/map-api/profiles` | 可寻址的 profile 列表（`profileCommandName` 为真的那些） |
+| GET | `/map-api/teams/:teamId/tasks/:taskId` | 一个任务的 attempt 时间线（含回滚记录）。**按需拉取**，不进每秒轮询的快照 |
+| POST | `/map-api/teams/:teamId/plan` | 从画布编辑 staged 计划。与 `flow_edit_plan` 共用 `applyTeamEdits`，K8 只判一次 |
+| POST | `/map-api/teams/:teamId/approve` | 从画布批准 staged 计划。与 `flow_approve` 共用 `applyTeamApproval` |
+
+后两条是**人通过自己的画布操作自己的团队**，授权靠 `Host` 校验而非会话身份 ——
+HTTP 请求不带身份，硬造一个就是"看起来有保证"而不是保证。两条约束保证它们不是绕过
+工具层的后门：走的是同一份 `applyTeamEdits` / `applyTeamApproval`，且只接受
+`canAppend` 为真的来源（`.agent-teams` 导入的团队是别人的记录，不能追加）。
 
 ### postMessage 协议
 
@@ -209,7 +344,8 @@ dsh-flow (纯 JS，无运行时依赖)
 | 位置 | 内容 |
 | --- | --- |
 | `<DSH home>/flow/workspaces.json`（+ `.lock`） | 工作区 / 节点 / 投影消息，gzip 压缩存放（明文 JSON 也能读）；**只支持单实例写入** |
-| `<DSH home>/flow/teams.json`（+ `.lock`） | 团队快照（成员 / 任务 / 依赖 / 收件箱）；**只支持单实例写入** |
+| `<stateDir>/<teamId>/events.jsonl` | 团队**事实源**：append-only 事件日志（默认 `stateDir` 是 `.dsh-flow`） |
+| `<stateDir>/<teamId>/state.json` · `manifest.json` · `mail/` | 检查点、元信息、每个成员一个收件箱 |
 | `dsh-flow:map-card-positions:v3` | 会话卡坐标（与旧版画布兼容） |
 | `dsh-flow:cluster-positions:v1` | 团队区域卡片坐标 |
 | `dsh-flow:map-collapsed-cards:v1` | 折叠状态 |
@@ -222,7 +358,10 @@ dsh-flow (纯 JS，无运行时依赖)
 
 **一张画布，层级化编排。** 会话与团队本来就是同一次工作的两个视角：团队由会话拉起，任务在会话里汇报。拆成两个页面只会让两边各养一套引擎、各长一套外观。现在引擎（`engine.js`）只管相机、手势、裁剪和连线，与业务无关；会话与团队都是它上面的节点和边，团队作为嵌套区域长在需求时间轴之下——层级用包含表达，时间用列表达。
 
-**团队数据存在自己家里。** 团队结构由画布在拉取成功时镜像快照到 `flow/teams.json`：安装着 agent-teams 就跟实时，卸载了就用快照渲染历史。dsh-flow 对外部插件的唯一依赖是它的 state 接口，且可降级。
+**团队数据存在自己家里。** 团队结构落在自己的 append-only 日志里，画布读自己的
+`map-api`，不镜像任何人的状态。这样做的直接后果是**卸载 agent-teams 之后一切照常**：
+没有"降级成冻结的快照"这个中间态，因为从来没有过第二份记录。装了 agent-teams 时
+它是来源注册表里的一个**只读来源**，一个开关，不是一个依赖。
 
 **中继消息在投影层结构化。** 信封解析放在宿主侧 `index.js` 而不是渲染层，因为落盘的就是脏数据，晚洗不如早洗；渲染层只对存量旧数据做同规则兜底。
 
@@ -233,9 +372,10 @@ dsh-flow (纯 JS，无运行时依赖)
 ## 开发
 
 ```sh
-pnpm test        # 365 项：规则核心、真文件系统的 store、调度器、工具、整个内核
-pnpm run build   # 语法 + 逐层边界 + serve 白名单 + 主题 token 纪律
-pnpm test:diff   # 31 项与 dsh-agent-teams 的差分
+pnpm test             # 434 项：规则核心、真文件系统的 store、调度器、工具、整个内核
+pnpm run build        # 语法 + 逐层边界 + serve 白名单 + 主题 token 纪律
+pnpm test:diff        # 31 项与 dsh-agent-teams 的差分（同名函数喂同一批输入，比结论）
+pnpm test:rehearsal   # 拿一份真实的 .agent-teams 目录演练：磁盘上每条都能读到
 
 dsh web
 # 对话区顶部标签行点「智能体画布」
@@ -254,12 +394,16 @@ host 层不许进 serve 白名单、依赖只许指向内侧、每层的入口�
 
 ## 已知边界
 
-- **团队数据是快照冻结**：未安装 agent-teams 时，团队区域渲染的是最后一次拉取的快照——不再有新团队 / 新任务出现。装回 agent-teams 后自动恢复实时。
-- **团队与会话之间没有连线**：快照不记录团队由哪个会话拉起之外的运行时关系；画布上的对话链来自会话投影本身。
-- **两个数据文件都只支持单实例写入**：`workspaces.json` 与 `teams.json` 各有跨进程锁与「已被另一实例修改」告警，但锁是咨询性的，双开仍可能互相覆盖。
+- **画布的实际渲染没有自动化测试**：434 项测试覆盖的是宿主侧（规则、store、调度器、
+  工具、内核）与面板模块的**纯渲染函数**。画布的 DOM 行为——拖拽、`<select>` 交互、
+  可点任务行、编辑后的重绘——需要在真实浏览器里打开逐项过一遍，这部分没有 CI 兜底。
+- **`.agent-teams` 来源是只读的**：可以列出来看，不能从画布改（`canAppend` 为假）。
+  它是别人的记录，追加等于用我们不拥有的 id 在我们的日志里写第二份团队。
+- **团队与会话之间没有连线**：团队记录里只有"由哪个会话拉起"；画布上的对话链来自会话投影本身。
+- **两个数据位置都只支持单实例写入**：`workspaces.json` 与团队 store 各有跨进程锁与
+  「已被另一实例修改」告警，但锁是咨询性的，双开仍可能互相覆盖。
 - **画布内部文案未国际化**：标签名会跟随宿主中/英，画布内部文案暂为中文。
 - **画布页不带导航 chrome**：入口只有宿主标签行。标签只在**有会话**时出现（宿主对空白会话整个返回 null）。若宿主 `slots` 服务缺失，标签不会注册，此时只能用直链。
-- **没有测试**：仓库里没有测试目录。
 
 ## 许可证
 

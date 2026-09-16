@@ -20,7 +20,7 @@
     "kernel.js",
     "cordis.patch.yml",
     "README.md",
-    "README_EN.md",
+    "README_CN.md",
     "DESIGN.md"
   ],
   "scripts": {

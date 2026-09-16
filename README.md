@@ -1,111 +1,100 @@
 # dsh-flow
 
-**中文** · [English](./README_EN.md)
+[中文](./README_CN.md) · **English**
 
-给 DeepSeek Harness 加一个**统一智能体画布**标签：会话时间轴与多智能体团队层级编排同处一图——用户需求轮在主时间轴，团队作为嵌套区域长在其下，每个成员一个子区域，装着ta的任务与发言卡；成员立绘、按说话者编织的对话链、任务依赖 DAG 一眼可读。
+Adds a **unified agent canvas** tab to DeepSeek Harness: the session timeline and the multi-agent team hierarchy share one figure — the user's requirement turns stay on the main timeline, the team grows below them as a nested region, each member gets a sub-region holding their tasks and speech cards. Character artwork, a dialogue chain woven by speaker, and the task dependency DAG all read at a glance.
 
-![智能体画布：需求时间轴 + 团队层级编排 + 立绘检查器](assets/1.png)
+![Agent canvas: requirement timeline + team hierarchy + artwork inspector](assets/1.png)
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B7285?style=flat-square" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Node.js-%3E%3D22.19.0-3c873a?style=flat-square" alt="Node.js >= 22.19.0">
   <img src="https://img.shields.io/badge/DSH-web%20profile-5B4CF0?style=flat-square" alt="DSH web profile">
-  <img src="https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%97%B6%E4%BE%9D%E8%B5%96-0-2ea44f?style=flat-square" alt="zero runtime dependencies">
-  <img src="https://img.shields.io/badge/%E6%9E%84%E5%BB%BA%E6%AD%A5-%E6%97%A0-f0ad4e?style=flat-square" alt="no build step">
+  <img src="https://img.shields.io/badge/runtime%20deps-0-2ea44f?style=flat-square" alt="zero runtime dependencies">
+  <img src="https://img.shields.io/badge/build%20step-none-f0ad4e?style=flat-square" alt="no build step">
 </p>
 
-## 一句话
+## In one line
 
-**需求 → 拉起智能体团队 → 画布自动生成这张图**：对话按说话者分层编排，任务按依赖连线，数据存在 dsh-flow 自己的存储里。
+**A requirement → raise an agent team → the canvas draws this figure**: dialogue is laid out by speaker, tasks are wired by dependency, and the data lives in dsh-flow's own storage.
 
-它**完整替代 [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)**：13 个工具一一对应，31 项差分守着这条线；但它不依赖对方——装了对方是可选的只读来源，没装照常跑完。用起来有什么不同，见[对照](#与-dsh-agent-teams-的对照)。
+It **fully replaces [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)**: the 13 tools map one to one, and 31 differential checks guard that line. But it does not depend on the other plugin — if that plugin is installed it is an optional read-only source, and if it is not, everything still runs. For what differs in use, see the [comparison](#comparison-with-dsh-agent-teams).
 
-## 快速开始
+## Quick start
 
-需要支持 profile 插件机制的 DeepSeek Harness、Node.js `>= 22.19.0`，以及 `web` profile。
+You need a DeepSeek Harness that supports the profile plugin mechanism, Node.js `>= 22.19.0`, and the `web` profile.
 
 ```sh
 dsh plugin --profile web add github:rootkiller6788/dsh-flow
 dsh web
 ```
 
-> 本插件**未发布到 npm**：`dsh-flow` 这个名字在 registry 上属于另一个项目，请不要用 `dsh plugin add dsh-flow`。
+> This plugin is **not published to npm**: the name `dsh-flow` belongs to another project on the registry, so please do not use `dsh plugin add dsh-flow`.
 
-启动后，对话区顶部的标签行会多出一个「智能体画布」标签；也可以直接打开 `/dsh-flow/`。
+Once it starts, the tab bar above the conversation area gains an **Agent Canvas** tab; you can also open `/dsh-flow/` directly.
 
-## 画布上有什么
+## What is on the canvas
 
-一个页面、一个引擎、一张图。节点分两类：
+One page, one engine, one figure. Nodes come in two kinds:
 
-| 节点 | 画的是什么 | 数据源 |
+| Node | What it draws | Data source |
 | --- | --- | --- |
-| **会话轮次卡** | 一轮对话（提问 + 回答），按 DSH 原生 fork 关系连成分支树，可追问 / 分支 / 归档；成员中继与子代理通知等**智能体事件轮**以派生标签呈现（`论文手 → 队长`），不暴露协议原文 | 宿主 `sessions` + `workspaces` 服务，投影落盘到 `flow/workspaces.json` |
-| **团队层级区域** | 团队标题条下嵌套**成员子区域**：每个成员一格，装着ta的任务 chip（按依赖深度连线）与发言卡（按时间排布）。指派关系由包含表达，依赖用箭头，对话流向由跨区域的轮次链表达 | 团队数据**存放在 dsh-flow 自己的存储**（`<stateDir>/<teamId>/events.jsonl`）；部署里有 `.agent-teams/` 时它作为**只读来源**一并列出 |
+| **Session turn card** | One round of conversation (question + answer), wired into a branch tree by DSH's native fork relation; follow-up / branch / archive from here. **Agent event turns** — member relays, subagent notices — render as a derived label (`论文手 → 队长`), never as raw protocol text | The host's `sessions` + `workspaces` services, projected to disk at `flow/workspaces.json` |
+| **Team region** | Under the team's title bar, nested **member sub-regions**: one cell per member, holding their task chips (wired by dependency depth) and speech cards (laid out in time order). Assignment is expressed by containment, dependency by arrows, dialogue flow by the turn chain crossing regions | Team data **lives in dsh-flow's own storage** (`<stateDir>/<teamId>/events.jsonl`); when the deployment has a `.agent-teams/`, it is listed alongside as a **read-only source** |
 
-### 多智能体对话
+### Multi-agent dialogue
 
-点开一张轮次卡，检查器里是**参与者气泡流**：用户消息、成员中继消息（立绘头像 + `发送者 → 接收者` 方向）、子代理通知各自成块，工具调用折叠在过程记录里。
+Open a turn card and the inspector shows a **participant bubble flow**: user messages, member relay messages (artwork avatar + `sender → recipient` direction), and subagent notices each as their own block, with tool calls folded into the process record.
 
-agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【发送者 → 接收者】正文` 之类的信封中继进宿主会话。本插件在**投影层就把信封拆成结构**（`message.agent`），渲染层对旧数据做同规则兜底——UUID 和协议原文不会出现在画布上。
+agent-teams (or the host) relays member messages into the host session inside an envelope like `Agent <uuid> sent a message:【sender → recipient】body`. This plugin **splits the envelope into structure at the projection layer** (`message.agent`), and the render layer applies the same rule to older data as a fallback — no UUID and no protocol text ever reaches the canvas.
 
-### 团队检查器
+### Team inspector
 
-点团队标题条或成员子区域，右栏呈现**整体编排**：成员立绘行（头像 + 角色 + 模型 + 进度
-+ 此刻的活动状态）、任务依赖列表（状态 chip）、队长收件箱（成员 → 队长的真实消息），
-以及三块判据面板：
+Click a team's title bar or a member sub-region and the right pane shows the **whole arrangement**: member artwork rows (avatar + role + model + progress + current activity), the task dependency list (state chips), the captain's mailbox (real member → captain messages), plus three judgement panels:
 
-- **K9 判词 / K10 blockers / K11 覆盖矩阵** —— 与模型调 `flow_status` 时看到的是同一份
-  计算，所以画布上读到的结论和队长做决定时依据的结论不会分叉
-- **点任务行**展开该任务的 **attempt 时间线**：一次任务试过几次、每次都怎么了、哪次被
-  回滚（这是协议层才有的信息，单调的 attempt 计数器说不出每一次的结局）
-- **staged 团队**的检查器可**直接编辑并批准**，与 `flow_edit_plan` / `flow_approve`
-  走同一份校验
+- **K9 verdict / K10 blockers / K11 coverage matrix** — the same computation the model sees when it calls `flow_status`, so what you read off the canvas cannot drift from what the captain decided on
+- **Click a task row** to expand that task's **attempt timeline**: how many times it was tried, how each attempt ended, which one was rolled back (this information exists only at the protocol layer — a monotonic attempt counter cannot say how any single attempt ended)
+- **Staged teams** are **editable and approvable right in the inspector**, through the same validation `flow_edit_plan` / `flow_approve` use
 
-团队数据有读不出来的行时，团队卡上出现 `数据损坏 N` 徽章，检查器里逐条列出**种类 /
-成员 / 行号 / 原因** —— 行号是让坏文件可修的唯一东西。进不了画布的团队由工具栏的
-全局计数兜住，否则它在画布上根本不存在。
+When team data contains lines that cannot be read, the team's card grows a `数据损坏 N` badge and the inspector lists each one with its **kind / member / line number / reason** — the line number is the only thing that makes a damaged file fixable. Teams that cannot reach the canvas at all are covered by a deployment-wide count in the toolbar; otherwise they simply would not exist on the canvas.
 
-### 立绘系统
+### Artwork
 
-`assets/` 内置 15 张角色/动作图（9 职业 + 6 状态）。成员名与角色关键词自动映射立绘（资料/数据→分析师、建模/科学→科学家、验证/审阅→QA、求解/实现→工程师、论文/写作→研究员、队长→船长……），未匹配回退首字色块。立绘容器背景跟随明暗主题。
+`assets/` ships 15 character/action images (9 professions + 6 states). Member names and role keywords map to artwork automatically (research/data → analyst, modelling/science → scientist, verify/review → QA, solve/implement → engineer, paper/writing → researcher, captain → captain …), falling back to a colour block with the first character. The artwork container's background follows the light/dark theme.
 
-## 团队数据的归属
+## Where team data lives
 
-团队结构（成员 / 任务 / 依赖 / 收件箱）**存放在 dsh-flow 自己的存储**，按团队分目录：
+Team structure (members / tasks / dependencies / mailboxes) **lives in dsh-flow's own storage**, one directory per team:
 
 ```
-<stateDir>/            # 默认 .dsh-flow
+<stateDir>/            # defaults to .dsh-flow
 └── <teamId>/
-    ├── events.jsonl   # append-only 事实源 —— 团队做过什么，全在这里
-    ├── state.json     # 检查点：events.jsonl 的一次读法，可以丢掉再重建
-    ├── manifest.json  # 创建时间、初始目标一类的元信息
-    └── mail/          # 每个成员一个 .jsonl 收件箱
+    ├── events.jsonl   # the append-only source of truth — everything the team did
+    ├── state.json     # a checkpoint: one reading of events.jsonl, discardable and rebuildable
+    ├── manifest.json  # metadata such as creation time and the initial goal
+    └── mail/          # one .jsonl mailbox per member
 ```
 
-**日志是事实，检查点是缓存。** 两者对不上时以日志为准，并且这次不一致会被
-`teamDiffEvents` 判为错误而不是悄悄抹平 —— 对账**拒绝**表达不出来的差异，而不是
-挑一个赢家。读不出来的行不会中断解析，但会进导入报告（见下）。
+**The log is the fact; the checkpoint is a cache.** When the two disagree the log wins, and the disagreement is judged an error by `teamDiffEvents` rather than quietly smoothed over — reconciliation **refuses** a difference it cannot express instead of picking a winner. A line that cannot be read never stops parsing, but it does go into the import report (below).
 
-团队从哪来是一个**来源注册表**（`ctx.flowTeamSources`）：本部署的日志永远在册；
-部署里存在 `.agent-teams/` 时，它作为一个**只读来源**同时列出。迁移期两边都看得见，
-所以换过来是一条配置而不是一次性大搬家（`canAppend` 为假的来源不能从画布改）。
+Where teams come from is a **source registry** (`ctx.flowTeamSources`): this deployment's own log is always registered, and when a `.agent-teams/` exists it is listed at the same time as a **read-only source**. During a migration you see both sets, so switching over is one config line rather than a big-bang move (a source whose `canAppend` is false cannot be edited from the canvas).
 
-对话编织本身来自**对话投影的中继解析**，不依赖任何外部插件。
+The dialogue weave itself comes from **relay parsing in the conversation projection** and depends on no external plugin.
 
-## 用起来
+## Using it
 
-- **`/dsh-flow` 命令**：`/dsh-flow [--profile <名字>] <目标>` 让当前会话成为队长并拉起团队。每个 profile 另有一个别名 `/dsh-flow-<名字>`（profile 名字须是小写字母数字加连字符才可寻址，`bug fix` 这类不生成别名而不是猜测它的规范化形式）。命令**只建队并停在待审计划**，不会在同一轮里批准——审阅正是暂存存在的理由。
-- **拖拽与记忆**：卡片可拖动，坐标存浏览器 `localStorage`，只作视觉元数据——节点身份始终是真身（DSH 会话 / teamId / 成员名），位置永远不确定身份。「重置」回到自动布局。
-- **检查器**：点卡片（非按钮区域）打开右侧检查器，同时把 DSH 的当前会话切到它——不离开画布。`Esc` 关闭。
-- **追问 / 分支**：检查器底部与卡片角标会在画布上开一张草稿卡，输入发生在画布上——这是唯一的写入口；快捷词可增删（最多 12 个，单个 16 字）。
-- **DSH 按钮**：切回宿主「对话」标签并锚定到那一轮；看完整过程记录在原生对话里做。
-- **归档**：卡片上的归档按钮把会话移出画布（记入 `hiddenSessionIds`），DSH 的列表刷新不会把它重建回来。
-- **主题**：浅 / 深色跟随宿主（`theme/change` 事件 → `data-theme`），深色由同一套设计 token 驱动；立绘容器背景同步切换。
-- 滚轮在卡片上滚动该卡自己的回答，在空白处缩放画布。
+- **The `/dsh-flow` command**: `/dsh-flow [--profile <name>] <goal>` makes the current session the captain and raises a team. Each profile also gets an alias `/dsh-flow-<name>` (a profile name must be lowercase alphanumeric plus hyphens to be addressable; a name like `bug fix` yields no alias rather than a guessed normalisation). The command **only creates the team and stops at the staged plan** — it never approves in the same turn, because review is the reason staging exists.
+- **Dragging and memory**: cards can be dragged; coordinates go to browser `localStorage` as visual metadata only — a node's identity is always the real thing (DSH session / teamId / member name), and position never determines identity. "Reset" returns to automatic layout.
+- **Inspector**: click a card (not on a button) to open the right inspector, which also switches the current DSH session to it — without leaving the canvas. `Esc` closes.
+- **Follow-up / branch**: the inspector footer and a card corner open a draft card on the canvas; typing happens on the canvas, which is the only write entry point. Quick phrases are editable (up to 12, 16 characters each).
+- **DSH button**: switches back to the host's Chat tab and anchors to that turn; the full process record is read in the native conversation.
+- **Archive**: the archive button on a card moves the session off the canvas (recorded in `hiddenSessionIds`); a DSH list refresh will not rebuild it.
+- **Theme**: light / dark follows the host (`theme/change` event → `data-theme`), dark is driven by the same design tokens, and the artwork container background switches with it.
+- The wheel scrolls a card's own answer over a card, and zooms the canvas over empty space.
 
-## 配置
+## Configuration
 
-在 profile 的 `cordis.patch.yml` 里覆盖本插件的 config：
+Override this plugin's config in the profile's `cordis.patch.yml`:
 
 ```yaml
 - insert:
@@ -117,322 +106,272 @@ agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【
         projectionWorkspaceTitle: DSH 任务
         trustedHosts: []
 
-        stateDir: .dsh-flow        # 团队住在哪
-        runner: subagents          # manual | subagents（组合期定死）
+        stateDir: .dsh-flow        # where teams live
+        runner: subagents          # manual | subagents (fixed at composition time)
         memberProvider: spawn
         maxMembers: 8
-        # agentTeamsStateDir: .agent-teams   # 迁移期才打开
-        # profiles: {...}                     # 见下
+        # agentTeamsStateDir: .agent-teams   # open this only while migrating
+        # profiles: {...}                     # see below
 ```
 
-| 键 | 默认 | 说明 |
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `dataFile` | `dshHomePath('flow/workspaces.json')` | 画布图的持久化路径，**必填** |
-| `autoProjection` | `true` | 是否自动把 DSH 会话投影到画布（监听 `session/created` 与 `session/event`） |
-| `projectionWorkspaceTitle` | `DSH 任务` | 无法从 cwd 推出工作区名时的回退标题 |
-| `trustedHosts` | `[]` | 额外放行的 Host 头（`localhost` 与 `127.0.0.1` 始终放行） |
-| `stateDir` | `.dsh-flow` | 团队日志与收件箱的根目录；相对路径按会话工作目录解析，这让两个部署的团队互不串门 |
-| `runner` | `subagents` | **组合期二选一**：`subagents` 是真内核，`manual` 表示"能看能改但不执行" |
-| `memberProvider` | `spawn` | 成员用哪个 subagent provider 启动 |
-| `agentTeamsStateDir` | 无 | 给出则把该 `.agent-teams` 目录注册成**只读来源**；迁移期两边团队同时可见，`flow_*` 工具仍只操作我们自己的 |
-| `maxMembers` | — | profile 名册与它们产出的团队的成员上限 |
-| `profiles` | 无 | 团队 profile 表：命名名册 + 种子任务 + 评审策略 |
+| `dataFile` | `dshHomePath('flow/workspaces.json')` | Persistence path for the canvas figure. **Required** |
+| `autoProjection` | `true` | Whether to project DSH sessions onto the canvas automatically (listens to `session/created` and `session/event`) |
+| `projectionWorkspaceTitle` | `DSH 任务` | Fallback title when no workspace name can be derived from the cwd |
+| `trustedHosts` | `[]` | Extra authorities the `Host` check accepts (`localhost` and `127.0.0.1` are always allowed) |
+| `stateDir` | `.dsh-flow` | Root of the team logs and mailboxes; a relative path resolves against the session working directory, which keeps two deployments' teams out of each other |
+| `runner` | `subagents` | **A composition-time choice**: `subagents` is the real kernel, `manual` means "you can look and edit, nothing executes" |
+| `memberProvider` | `spawn` | Which subagent provider members are started with |
+| `agentTeamsStateDir` | none | When given, registers that `.agent-teams` directory as a **read-only source**; during a migration both sets of teams are visible while the `flow_*` tools keep acting on ours |
+| `maxMembers` | — | Member cap for profile rosters and for the teams they produce |
+| `profiles` | none | The team profile table: a named roster + seed tasks + a review policy |
 
-`profiles` 是**部署配置而不是协议**——一个部署提供哪些团队是它自己的事，所以它住在
-config 里而不住在代码里。每个 profile 的 `taskPlanning` 只有两种取值：`seed`（下面的
-任务定义整张图）或 `captain`（给名册，图由队长设计）。名册里给出的 `role` /
-`reasoning_effort` 决定成员的默认路由。
+`profiles` is **deployment configuration rather than protocol** — which teams a deployment offers is its own business, so it lives in config and not in code. A profile's `taskPlanning` has exactly two values: `seed` (the tasks below define the whole graph) or `captain` (the roster is given, the graph is the captain's to design). The `role` / `reasoning_effort` given in a roster decide the members' default routes.
 
-`/dsh-flow` 路由不在 DSH `/api` 的浏览器信任围栏内，所以插件自己校验 `Host` 头以防 DNS rebinding；换非本机地址访问时把主机名加进 `trustedHosts`。
+The `/dsh-flow` routes are not inside DSH `/api`'s browser trust fence, so the plugin checks the `Host` header itself against DNS rebinding; to reach it from a non-local address, add the hostname to `trustedHosts`.
 
-## 架构
+## Architecture
 
-单包、零运行时依赖、无构建。**源码就是产物**：`files` 里是 `.js` 而不是 `lib/`，
-克隆下来就能跑，没有一步"先编译"。
+One package, zero runtime dependencies, no build. **The source is the artifact**: `files` lists `.js`, not `lib/` — clone it and it runs, with no "compile first" step.
 
-宿主的设计哲学是 everything is a plugin，服务按 `core` / `seam` / `bundle` 分类。
-dsh-flow 用同一套划分自己：**一个纯核、两个 seam、一个组合根**。
+The host's design philosophy is everything is a plugin, and it classifies services as `core` / `seam` / `bundle`. dsh-flow divides itself the same way: **one pure core, two seams, one composition root**.
 
-### 三个服务
+### The three services
 
-| 服务 | 分类 | 形态 | 为什么必须是这种形态 |
+| Service | Class | Form | Why it has to be that form |
 | --- | --- | --- | --- |
-| `ctx.flowTeams` | core | 单例 | 本部署只有一份团队记录，别的插件是它的消费者 |
-| `ctx.flowTeamSources` | seam | **注册表** | 实现真的共存：迁移期原生团队与 `.agent-teams` 团队要同时可见 |
-| `ctx.flowRunner` | seam | **组合期二选一** | 两个实例会打架：两个调度器会抢同一个任务 |
+| `ctx.flowTeams` | core | single instance | This deployment has exactly one team record, and other plugins consume it |
+| `ctx.flowTeamSources` | seam | **registry** | The implementations really do coexist: during a migration, native teams and `.agent-teams` teams must both be visible |
+| `ctx.flowRunner` | seam | **one of two, chosen at composition time** | Two instances would fight: two schedulers would claim the same task |
 
-一个名字只能有一个 provider（同名第二次 `ctx.provide` 直接抛错），所以上面这个区别
-不是风格选择，是硬约束 —— 共存的做成注册表，互斥的必须在组合期定死。
+One name can have only one provider (a second `ctx.provide` under the same name throws), so the distinction above is not a style choice but a hard constraint — what coexists becomes a registry, and what is mutually exclusive must be fixed at composition time.
 
-`kernel.js` 是组合根：唯一一处把 store / runner / tools 摆在一起的地方。它不实现任何
-能力，只决定这次部署用哪个实现、把它们接到哪些 seam 上。
+`kernel.js` is the composition root: the one place that puts store / runner / tools side by side. It implements no capability itself; it only decides which implementation this deployment uses and which seams they are attached to.
 
-### 七层，每层的不变量都在门里断言
+### Seven layers, each layer's invariant asserted by the gate
 
-边界由目录表达，由 `pnpm run build` **逐层断言** —— 一条没有断言的边界会随时间消失，
-剩下的只是一个碰巧这么放的目录。
+Boundaries are expressed by directories and **asserted layer by layer** by `pnpm run build` — a boundary nobody asserts decays over time, and what is left is just a directory that happens to sit there.
 
-| 层 | 模块 | 门里断言的不变量 |
+| Layer | Modules | The invariant the gate asserts |
 | --- | --- | --- |
-| `rules/` | 25 | 纯核：不许 `node:`，不许出现 `ctx` —— 普通 Node 就能 import |
-| `canvas/` | 12 | 浏览器侧：不许 `node:`；**只许读纯核**，import 任何 host 层都算越界 |
-| `store/` | 5 | host 侧：**不许进 serve 白名单**（进了就是把它发给浏览器） |
-| `sources/` | 3 | 同上 |
-| `runner/` | 11 | 同上 |
-| `tools/` | 8 | 同上 |
-| `config/` | 2 | 同上 |
-| *所有层* | — | 依赖**只指向内侧**；**没有任何模块可以 import `canvas/`**（它是叶子，不是库） |
+| `rules/` | 25 | The pure core: no `node:`, no `ctx` — importable by plain Node |
+| `canvas/` | 12 | Browser side: no `node:`; **it may read the pure core and nothing else**, importing any host layer is a boundary crossed |
+| `store/` | 5 | Host side: **must not enter the serve allowlist** (entering it means shipping it to the browser) |
+| `sources/` | 3 | same as above |
+| `runner/` | 11 | same as above |
+| `tools/` | 8 | same as above |
+| `config/` | 2 | same as above |
+| *all layers* | — | Dependencies **point inward only**; **no module may import `canvas/`** (it is a leaf, not a library) |
 
 ```
-dsh-flow (纯 JS，无运行时依赖)
+dsh-flow (plain JS, no runtime dependencies)
 ├── src/
-│   ├── rules/          # 25 个 —— 纯核：K1–K14 + 事件协议 + 投影 + 对账（无 IO，无 ctx）
+│   ├── rules/          # 25 — the pure core: K1–K14 + the event protocol + projection + reconcile
 │   │                   #   entities / gates / project / reconcile / coverage / delivery …
-│   ├── store/          #  5 个 —— 团队注册表 + append-only 日志 + 收件箱 + 快照 + 导入报告
-│   │                   #   → ctx.flowTeams（core）
-│   ├── sources/        #  3 个 —— 团队来源注册表：本部署的日志 / 导入的 .agent-teams（只读）
-│   │                   #   → ctx.flowTeamSources（seam，注册表形态）
-│   ├── runner/         # 11 个 —— 执行 seam：interface.js 定义它，manual / subagents 两个实现
-│   │                   #   → ctx.flowRunner（seam，组合期二选一）
-│   ├── tools/          #  8 个 —— 13 个 flow_* 工具的注册与实现
-│   ├── config/         #  2 个 —— 部署配置：profile 表 + 两个把配置变成事件的 hook
-│   └── canvas/         # 12 个 —— 统一画布页面（唯一会被 HTTP 服务的一层）
-│       ├── canvas.js   #   入口：宿主桥、实时回复、轮询、启动
-│       ├── core.js     #   共享状态、几何常量、localStorage、宿主桥接、成员配色
-│       ├── html.js     #   转义等纯工具（拆出来是为了让面板模块可在 Node 下测）
-│       ├── markdown.js #   Markdown 渲染（含 ■ 分节规范化）
-│       ├── relay.js    #   智能体信封解析（中继/成员消息/子代理通知）
-│       ├── session.js  #   会话投影数据层（增量合并 + 游标）+ 轮次卡 + 分支图布局
-│       ├── teams.js    #   团队轮询（实时→快照回退）+ 层级区域布局
-│       ├── team-panels.js # 团队面板的纯渲染（K9/K10/K11、attempt 时间线、坏行）
-│       ├── scene.js    #   场景装配：需求时间轴 + 嵌套区域 + 类型化连线
-│       ├── view.js     #   相机、虚拟化挂载、节点渲染、检查器、主渲染
-│       ├── artwork.js  #   立绘映射（角色关键词 → 职业图，状态 → 动作图）
-│       └── actions.js  #   交互：草稿 / 追问 / 分支 / 归档 / 快捷词 / 选择追问
-├── index.js            # 宿主侧入口：WorkspaceStore + 会话事件投影 + 信封解析 + 路由
-├── client.js           # 客户端：一个 conversation.view 标签（内嵌 iframe）+ 主题跟随 + 动作中继
-├── engine.js           # 画布引擎：相机 / 手势 / 视口裁剪 / 连线几何 / 拖拽绑定
-├── theme.css           # 设计 token（浅/深一套变量）+ 全部组件样式
-├── assets/             # 15 张立绘（9 职业 + 6 状态）
-├── kernel.js           # 组合根：唯一一处把 store / runner / tools 摆在一起的地方
-├── cordis.patch.yml    # 插入 dsh-flow 服务，并给出它的 config
+│   ├── store/          #  5 — team registry + append-only log + mailboxes + snapshot + import report
+│   │                   #   → ctx.flowTeams (core)
+│   ├── sources/        #  3 — the team source registry: this deployment's log / an imported .agent-teams
+│   │                   #   → ctx.flowTeamSources (seam, registry form)
+│   ├── runner/         # 11 — the executor seam: interface.js defines it, manual / subagents implement it
+│   │                   #   → ctx.flowRunner (seam, one of two at composition time)
+│   ├── tools/          #  8 — registration and implementation of the 13 flow_* tools
+│   ├── config/         #  2 — deployment configuration: the profile table + the two hooks turning config into events
+│   └── canvas/         # 12 — the canvas page (the only layer ever served over HTTP)
+│       ├── canvas.js   #   entry: host bridge, live replies, polling, boot
+│       ├── core.js     #   shared state, geometry, localStorage, host bridge, member colours
+│       ├── html.js     #   escaping and other pure helpers (split out so panel modules are testable in Node)
+│       ├── markdown.js #   Markdown rendering (with ■ section normalisation)
+│       ├── relay.js    #   agent envelope parsing (relays / member messages / subagent notices)
+│       ├── session.js  #   session projection data layer (incremental merge + cursors) + turn cards + branch layout
+│       ├── teams.js    #   team polling (live → snapshot fallback) + hierarchical region layout
+│       ├── team-panels.js # pure rendering for the panels (K9/K10/K11, attempt timeline, damaged lines)
+│       ├── scene.js    #   scene assembly: requirement timeline + nested regions + typed edges
+│       ├── view.js     #   camera, virtualised mounting, node rendering, inspector, main render
+│       ├── artwork.js  #   artwork mapping (role keyword → profession image, state → action image)
+│       └── actions.js  #   interaction: draft / follow-up / branch / archive / quick phrases / select-and-ask
+├── index.js            # host-side entry: WorkspaceStore + session event projection + envelope parsing + routes
+├── client.js           # client: one conversation.view tab (an embedded iframe) + theme following + action relay
+├── engine.js           # canvas engine: camera / gestures / viewport culling / edge geometry / drag binding
+├── theme.css           # design tokens (one set of variables for light/dark) + all component styles
+├── assets/             # 15 artwork images (9 professions + 6 states)
+├── kernel.js           # the composition root: the one place that puts store / runner / tools side by side
+├── cordis.patch.yml    # inserts the dsh-flow service and gives it its config
 └── package.json        # dsh.bundle.patch + dsh.client.inject
 ```
 
-**依赖只指向内侧。** `rules` 不依赖任何层；`store` / `sources` / `runner` / `tools` /
-`config` 只依赖 `rules`；`canvas` 只读 `rules`（团队数据经 HTTP 到达，不靠 import）；
-组合根依赖全部。每一条边在门里都有断言。
+**Dependencies point inward only.** `rules` depends on no layer; `store` / `sources` / `runner` / `tools` / `config` depend only on `rules`; `canvas` reads only `rules` (team data arrives over HTTP, not by import); the composition root depends on all of them. Every one of those edges is asserted in the gate.
 
-三条最容易悄悄破掉的规则，门都单独管：一个画布模块 `import 'node:fs'` 在
-`pnpm test` 下**全绿**，只有浏览器会发现；一个漏进白名单的模块只有一个 404 会发现；
-一个反向 import `canvas/` 的 host 模块在 Node 下也全绿。所以这些不是约定，是断言。
+Three rules break most quietly, and the gate handles each explicitly: a canvas module doing `import 'node:fs'` is **green everywhere under `pnpm test`** and only a browser would notice; a module missing from the serve allowlist is only discoverable through a 404; and a host module importing `canvas/` backwards is green in Node too. So these are not conventions, they are assertions.
 
-**团队活动怎么被观察：走自己的通道，不发会话事件。** 事实源是
-`<stateDir>/<teamId>/events.jsonl`（append-only 事件日志），投影成
-`GET /dsh-flow/map-api/teams` 供画布读取。
+**How team activity is observed: through its own channel, without emitting session events.** The source of truth is `<stateDir>/<teamId>/events.jsonl` (an append-only event log), projected to `GET /dsh-flow/map-api/teams` for the canvas to read.
 
-不往会话里写 `dsh-flow/*` 事件，是因为宿主不接纳：`KNOWN_SESSION_EVENT_TYPES`
-是构建期生成的封闭集合，其注释明说下游插件的事件"按构造不在其中"、注册面"推迟到
-真有消费者时"；而 `Session.append` 不给设信封的 `ignorable` 标记——缺了它，一个
-不认识的类型会被当作**必需**，读取端宁可拒绝重建**整个会话**。所以那样的事件只会
-被丢弃，或者破坏它落进去的那份日志。完整推演见 `kernel.js` 末尾那段注释。
+No `dsh-flow/*` event is written into the session because the host does not accept one: `KNOWN_SESSION_EVENT_TYPES` is a closed set generated at build time, whose comment states outright that a downstream plugin's events are "outside this list by construction" and that the registration surface is "deferred until there is a real consumer"; and `Session.append` offers no way to set the envelope's `ignorable` flag — without it an unrecognised type is treated as **required**, and the reader would rather refuse to reconstruct **the entire session**. So such an event would either be dropped or damage the log it landed in. The full argument is in the comment at the end of `kernel.js`.
 
-## 与 dsh-agent-teams 的对照
+## Comparison with dsh-agent-teams
 
-用宿主自己的词说，这是**插件内部有没有服务划分**的区别 —— 宿主把这件事讲成
-"everything is a plugin"、"Plugins, not loop changes"，落到代码上就是 `core` 与
-`seam` 的分法：
+In the host's own words, the difference is **whether a plugin divides its own internals into services**. The host frames this as "everything is a plugin" and "Plugins, not loop changes", which in code comes down to the `core` / `seam` split:
 
-| 通常的说法 | 宿主自己的术语 | 判据 |
+| Usual phrasing | The host's own terms | The evidence |
 | --- | --- | --- |
-| **微内核** | `core` 尽量小，能力都挂在**声明出来的 seam** 上；新行为走扩展点，不改 `core` | dsh-flow：`rules/` 纯核（不碰 IO、不碰 `ctx`）+ 三个服务 + 一个组合根 |
-| **宏内核** | 没有 seam，能力都长在 `core` 里 | dsh-agent-teams：`src/` 是一个平面（17 个 TS 模块 + `client/` 13 个），互相自由 `import`，没有断言模块边界的机制 |
+| **microkernel** | Keep `core` as small as possible and hang every capability off a **declared seam**; new behaviour goes on an extension point rather than into `core` | dsh-flow: a `rules/` pure core (no IO, no `ctx`) + three services + one composition root |
+| **monolithic kernel** | No seam; the capabilities all live inside `core` | dsh-agent-teams: `src/` is one flat plane (17 TS modules + 13 under `client/`), importing each other freely, with no mechanism asserting module boundaries |
 
-一条 seam 由三个角色构成——**Service Definition / Provider / Consumer**，三者齐了才算
-一条。在 dsh-flow 里这对齐得很直白：`runner/interface.js` 是定义，`manual.js` 与
-`subagents.js` 是两个 Provider，`tools/` 是 Consumer。
+A seam comprises three roles — **Service Definition / Provider / Consumer** — and is only complete with all three. In dsh-flow they line up plainly: `runner/interface.js` is the definition, `manual.js` and `subagents.js` are the two Providers, and `tools/` is the Consumer.
 
-**两者都是 DSH 插件**，都挂在宿主提供的 seam 上——差别在**插件内部**有没有自己的。
-功能划成 core 与 seam 之后，"加一种执行方式"是加一个 Provider，"加一种团队来源"是
-`register()` 一项；而在一个平铺的 `src/` 里，那是改核心。
+**Both are DSH plugins**, and both attach to seams the host provides — the difference is whether the plugin has seams of its own. Once the functionality is split into core and seam, "add another way to execute" is adding a Provider and "add another kind of team source" is one `register()` call; on a flat `src/`, that work is changing the core.
 
-dsh-flow 的目标是**完整替代** [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)：
-它有的能力都要有，但**不依赖它** —— 装了它是可选的只读来源，没装照常跑完。
+dsh-flow's goal is to **fully replace** [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams): everything it can do, this can do — but without depending on it. If it is installed, it is an optional read-only source; if it is not, everything still runs.
 
-能力面是对齐的：13 个工具与 `agent_teams_*` 一一对应，`pnpm test:diff` 的 31 项差分
-就是这条线的守卫（同名函数喂同一批输入，逐个比对结论）。**差别在用起来是什么样**：
+The capability surface is aligned: the 13 tools map one to one to `agent_teams_*`, and the 31 differential checks in `pnpm test:diff` guard that line (same functions fed the same inputs, conclusions compared one by one). **What differs is what it is like to use:**
 
-### 用起来是什么样
+### What it is like to use
 
 | | dsh-flow | dsh-agent-teams |
 | --- | --- | --- |
-| 安装 | 拉下来就能跑，**不装任何包** | 要装一整棵依赖树（24 个 peer，含 React 18） |
-| 宿主升级 | 不声明宿主版本，运行时探测能力，探不到走降级分支 | peer 里写死 4 个宿主版本，不在其中就用不了 |
-| 改画布一行 | 存盘 → **刷新页面**（0 构建、0 重启） | 重新构建客户端 bundle → **重启宿主** |
-| 停掉执行只留可视 | `runner: manual` —— 能看能改，什么都不跑 | 无等价开关 |
-| 一次任务试过几次 | 点任务行展开 **attempt 时间线**：每次的结局、哪次被回滚 | 一个单调的 attempt 计数器，说不出每次的结局 |
-| 读不出来的行 | 进**导入报告**，画布上带**行号**逐条列出 | — |
-| 进不了画布的团队 | 工具栏有计数，不会静默消失 | — |
-| 审批计划 | 画布上直接编辑 + 批准，与 `flow_edit_plan` / `flow_approve` 共用同一份校验 | 面板编辑 |
-| 画布 | 会话时间轴与团队层级**同一张图**（团队嵌套在需求轮之下） | 团队树面板 |
-| 卸掉对方 | 一切照常 —— 从来没有过第二份记录 | — |
+| Install | Clone it and it runs, **nothing to install** | Pulls a whole dependency tree (24 peers, including React 18) |
+| Host upgrade | Declares no host version; probes capabilities at runtime and takes a fallback branch when it cannot | Pins 4 host versions in its peers; outside those it will not work |
+| Change one canvas line | Save → **refresh the page** (0 builds, 0 restarts) | Rebuild the client bundle → **restart the host** |
+| Stop execution, keep the view | `runner: manual` — look and edit, nothing runs | No equivalent switch |
+| How a task's attempts went | Click a task row for the **attempt timeline**: how each attempt ended, which was rolled back | A monotonic attempt counter that cannot say how any one ended |
+| Unreadable lines | Go into the **import report**, listed with **line numbers** on the canvas | — |
+| Teams that cannot reach the canvas | Counted in the toolbar; they do not vanish silently | — |
+| Approving a plan | Edit and approve directly on the canvas, through the same validation `flow_edit_plan` / `flow_approve` use | Panel editing |
+| The canvas | Session timeline and team hierarchy **in one figure** (the team nests under the requirement turns) | A team tree panel |
+| Uninstalling the other plugin | Everything keeps working — there was never a second record | — |
 
-上表里"能感觉到"的那些，来源都在架构上：**改一行就生效**是因为画布模块由 HTTP
-逐个服务（`src/**` 按 mtime 失效 + ETag 复验），没有 bundle 步骤；**能换
-`runner: manual`** 是因为执行是一个 seam，在组合期定死；**卸掉对方照常跑**是因为团队
-记录是自己的 append-only 日志，对方只是来源注册表里的一项。改 `client.js`
-（标签注册那层）仍然两边都要重启宿主——那层确实进了宿主的客户端 bundle。
+What you can "feel" in the table above all comes from the architecture: **a change takes effect on refresh** because canvas modules are served over HTTP individually (`src/**` invalidated by mtime + ETag revalidation), with no bundle step; **`runner: manual` exists** because execution is a seam, fixed at composition time; and **uninstalling the other plugin changes nothing** because team records are this plugin's own append-only log, with the other plugin only an entry in the source registry. Changing `client.js` (the tab registration layer) still requires a host restart on both sides — that layer really does go into the host's client bundle.
 
-### 实测
+### Measurements
 
-都是本仓库自己的数，一行命令可复现：
+All of these are this repository's own numbers, reproducible with one command:
 
-| 项 | 数 |
+| Item | Number |
 | --- | --- |
-| 插件进宿主启动路径的代价（`import './index.js'`） | **4.3 ms** |
-| 组合根装配（`import './kernel.js'`，冷启动） | 33 ms |
-| 改 `src/canvas/**` 到生效 | **0 构建、0 重启** |
-| 画布首屏 | 41 个请求 / 449 KB；之后每次带 ETag 复验，没变就是 304 |
-| 逐层边界门（107 模块解析 + 7 层断言 + serve 白名单） | 4.0 s |
-| 全部测试 434 项 | 1.1 s |
+| Cost of the plugin on the host's startup path (`import './index.js'`) | **4.3 ms** |
+| Composition root assembly (`import './kernel.js'`, cold) | 33 ms |
+| A change to `src/canvas/**` taking effect | **0 builds, 0 restarts** |
+| Canvas first paint | 41 requests / 449 KB; every request afterwards revalidates by ETag, so unchanged files are a 304 |
+| The layer-boundary gate (107 modules parsed + 7 layers asserted + serve allowlist) | 4.0 s |
+| All 434 tests | 1.1 s |
 
-### 这里为什么没有"快 N 倍"
+### Why there is no "N times faster" here
 
-跨实现的性能对比要求**两边都能在这台机器上跑**。dsh-agent-teams 的完整管线现在跑不
-起来：它没有 `node_modules`，也没有 `lib/`（发布产物），而它的 `snapshot.ts` 直接
-`import '@deepseek-ai/dsh-llm'`、`'@deepseek-ai/dsh-agent'` 这些宿主运行时包。拿桩
-函数替掉它们再计时，量的是桩而不是它。它的状态读取层（`src/state.ts`）只依赖 node
-内建、理论上能在 Node 24 下直接跑，但那是外部仓库的代码，执行它需要你明确同意。
+A cross-implementation performance comparison requires **both sides to run on this machine**. dsh-agent-teams' full pipeline does not: it has no `node_modules` and no `lib/` (its published artifact), and its `snapshot.ts` imports host runtime packages directly (`@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-agent`). Replacing those with stubs and then timing measures the stubs, not it. Its state-reading layer (`src/state.ts`) depends only on Node builtins and could in principle run directly under Node 24, but that is another repository's code, and running it needs your explicit consent.
 
-所以任何"快 N 倍"在这个仓库里都是编的。能给的只有上面那种**不跑也能确认的差别**，
-加上我自己可复现的实测。
+So any "N times faster" in this repository would be invented. What can be given is the kind of difference above — **confirmable without running anything** — plus my own reproducible measurements.
 
-## 参考
+## Reference
 
-### HTTP 路由
+### HTTP routes
 
-全部经 `Host` 校验（`localhost` / `127.0.0.1` 默认放行）。
+All go through the `Host` check (`localhost` / `127.0.0.1` are allowed by default).
 
-| 方法 | 路径 | 作用 |
+| Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/dsh-flow` | 302 → `/dsh-flow/` |
-| GET | `/dsh-flow/` | 统一画布页 |
-| GET | `/dsh-flow/engine.js` · `/dsh-flow/src/canvas/*.js` · `/dsh-flow/src/rules/*.js` · `/dsh-flow/theme.css` | 画布资源 |
-| GET | `/dsh-flow/assets/*.png` | 立绘图（仅放行 `[a-z0-9-]+.png`） |
-| GET | `/dsh-flow/map` · `/dsh-flow/map/` | 302 → `/dsh-flow/`（旧路径兼容） |
-| * | `/dsh-flow/map-api/*` | 见下表 |
+| GET | `/dsh-flow/` | the canvas page |
+| GET | `/dsh-flow/engine.js` · `/dsh-flow/src/canvas/*.js` · `/dsh-flow/src/rules/*.js` · `/dsh-flow/theme.css` | canvas assets |
+| GET | `/dsh-flow/assets/*.png` | artwork (only `[a-z0-9-]+.png` is allowed) |
+| GET | `/dsh-flow/map` · `/dsh-flow/map/` | 302 → `/dsh-flow/` (old path) |
+| * | `/dsh-flow/map-api/*` | see below |
 
-### 画布 API
+### Canvas API
 
-| 方法 | 路径 | 作用 |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/map-api/reset` | 清空所有工作区，并隐藏当前全部 DSH 会话 |
-| GET | `/map-api/workspaces` | 工作区摘要列表 |
-| POST | `/map-api/workspaces` | 新建工作区 `{ title }` |
-| GET | `/map-api/workspaces/:id` | 完整工作区（含 threads / messages） |
-| POST | `/map-api/workspaces/:id` | 在工作区内新建节点 `{ title, parentId?, dshSessionId?, position?, color? }` |
-| POST | `/map-api/threads/:id/branch` | 从节点分叉 `{ title?, dshSessionId?, position?, color? }` |
-| POST | `/map-api/threads/:id/messages` | 追加一条消息 `{ text }` |
-| PATCH | `/map-api/threads/:id` | 改 `title` / `position` |
-| DELETE | `/map-api/threads/:id` | 删除节点**及其全部后代**，并隐藏对应 DSH 会话 |
-| POST | `/map-api/sessions/sync` | 用宿主会话列表对齐画布 `{ sessions, removedSessionIds }` |
-| POST | `/map-api/projection` | **增量读取**：`{ sessionIds, cursors }` → 只回这些会话所属的线程，且每个线程只带 `rev` 大于游标的消息；恒回 `threadIds` 供客户端剪除已归档节点 |
-| GET | `/map-api/teams` | 团队快照 `{ teams, damaged }`：来源注册表里此刻可见的全部团队，每支带自己的 `warnings`（导入报告），`damaged` 是**部署级**计数 —— 连画布都进不去的团队只有这里看得见 |
-| GET | `/map-api/profiles` | 可寻址的 profile 列表（`profileCommandName` 为真的那些） |
-| GET | `/map-api/teams/:teamId/tasks/:taskId` | 一个任务的 attempt 时间线（含回滚记录）。**按需拉取**，不进每秒轮询的快照 |
-| POST | `/map-api/teams/:teamId/plan` | 从画布编辑 staged 计划。与 `flow_edit_plan` 共用 `applyTeamEdits`，K8 只判一次 |
-| POST | `/map-api/teams/:teamId/approve` | 从画布批准 staged 计划。与 `flow_approve` 共用 `applyTeamApproval` |
+| POST | `/map-api/reset` | Clear every workspace and hide all current DSH sessions |
+| GET | `/map-api/workspaces` | Workspace summary list |
+| POST | `/map-api/workspaces` | Create a workspace `{ title }` |
+| GET | `/map-api/workspaces/:id` | A full workspace (with threads / messages) |
+| POST | `/map-api/workspaces/:id` | Create a node in a workspace `{ title, parentId?, dshSessionId?, position?, color? }` |
+| POST | `/map-api/threads/:id/branch` | Branch from a node `{ title?, dshSessionId?, position?, color? }` |
+| POST | `/map-api/threads/:id/messages` | Append a message `{ text }` |
+| PATCH | `/map-api/threads/:id` | Change `title` / `position` |
+| DELETE | `/map-api/threads/:id` | Delete a node **and every descendant**, and hide the matching DSH sessions |
+| POST | `/map-api/sessions/sync` | Align the canvas with the host's session list `{ sessions, removedSessionIds }` |
+| POST | `/map-api/projection` | **Incremental read**: `{ sessionIds, cursors }` → only the threads those sessions belong to, each carrying only messages whose `rev` exceeds the cursor; always returns `threadIds` so the client can prune archived nodes |
+| GET | `/map-api/teams` | Team snapshot `{ teams, damaged }`: every team currently visible in the source registry, each with its own `warnings` (the import report); `damaged` is a **deployment-wide** count — a team that cannot even reach the canvas is visible only here |
+| GET | `/map-api/profiles` | The addressable profile list (those with a truthy `profileCommandName`) |
+| GET | `/map-api/teams/:teamId/tasks/:taskId` | One task's attempt timeline (including rollbacks). **Fetched on demand**, never carried in the one-second poll |
+| POST | `/map-api/teams/:teamId/plan` | Edit a staged plan from the canvas. Shares `applyTeamEdits` with `flow_edit_plan`, so K8 judges once |
+| POST | `/map-api/teams/:teamId/approve` | Approve a staged plan from the canvas. Shares `applyTeamApproval` with `flow_approve` |
 
-后两条是**人通过自己的画布操作自己的团队**，授权靠 `Host` 校验而非会话身份 ——
-HTTP 请求不带身份，硬造一个就是"看起来有保证"而不是保证。两条约束保证它们不是绕过
-工具层的后门：走的是同一份 `applyTeamEdits` / `applyTeamApproval`，且只接受
-`canAppend` 为真的来源（`.agent-teams` 导入的团队是别人的记录，不能追加）。
+The last two are **a person acting on their own team through their own canvas**, authorised by the `Host` check rather than by a session identity — an HTTP request carries no identity, and inventing one would be the appearance of a guarantee rather than a guarantee. Two constraints keep them from being a way around the tool layer: they go through the same `applyTeamEdits` / `applyTeamApproval`, and they accept only a source whose `canAppend` is true (a team imported from `.agent-teams` is somebody else's record and must not be appended to).
 
-### postMessage 协议
+### postMessage protocol
 
-画布页与宿主客户端之间只认 `{ source: 'dsh-flow', type, ...payload }`，且校验 origin 与 `event.source` 必须是本插件挂载的那个 frame。
+Between the canvas page and the host client, only `{ source: 'dsh-flow', type, ...payload }` is recognised, and the origin and `event.source` must both be the frame this plugin mounted.
 
-| 方向 | 消息 | 载荷 | 行为 |
+| Direction | Message | Payload | Behaviour |
 | --- | --- | --- | --- |
-| 画布 → 宿主 | `flow:request-current` | — | 回送当前工作区与会话 |
-| 画布 → 宿主 | `flow:open-session` | `sessionId, seq?` | `sessions.open()` + 切回「对话」标签 + 按 `seq` 锚定滚动 |
-| 画布 → 宿主 | `flow:activate-session` | `sessionId` | `sessions.open()`，不离开画布 |
-| 画布 → 宿主 | `flow:fork-session` | `sessionId, atSeq?, requestId` | `sessions.fork()` |
-| 画布 → 宿主 | `flow:send-message` | `sessionId, text, requestId` | `session.prompt(text, 'queue')` |
-| 画布 → 宿主 | `flow:create-session` | `workspaceId?, cwd?, requestId` | `sessions.create()` |
-| 宿主 → 画布 | `flow:theme` · `flow:locale` | `dark` / `locale` | 主题与语言跟随 |
-| 宿主 → 画布 | `flow:workspaces` · `flow:current-session` | 工作区 / 当前会话 | 画布的输入 |
-| 宿主 → 画布 | `flow:live-reply` | `sessionId, running, text` | 正在生成时的实时回复 |
-| 宿主 → 画布 | `flow:forked-session` · `flow:created-session` · `flow:message-sent` · `flow:bridge-error` | `requestId, …` | 结算画布发起的 RPC |
+| canvas → host | `flow:request-current` | — | sends back the current workspace and session |
+| canvas → host | `flow:open-session` | `sessionId, seq?` | `sessions.open()` + switch back to the Chat tab + anchor the scroll at `seq` |
+| canvas → host | `flow:activate-session` | `sessionId` | `sessions.open()` without leaving the canvas |
+| canvas → host | `flow:fork-session` | `sessionId, atSeq?, requestId` | `sessions.fork()` |
+| canvas → host | `flow:send-message` | `sessionId, text, requestId` | `session.prompt(text, 'queue')` |
+| canvas → host | `flow:create-session` | `workspaceId?, cwd?, requestId` | `sessions.create()` |
+| host → canvas | `flow:theme` · `flow:locale` | `dark` / `locale` | theme and locale following |
+| host → canvas | `flow:workspaces` · `flow:current-session` | workspaces / current session | the canvas' input |
+| host → canvas | `flow:live-reply` | `sessionId, running, text` | the live reply while generating |
+| host → canvas | `flow:forked-session` · `flow:created-session` · `flow:message-sent` · `flow:bridge-error` | `requestId, …` | settling an RPC the canvas started |
 
-带 `requestId` 的调用由画布侧 `dshRpc()` 等待，超时 20s；直接在浏览器里打开画布页（不在 DSH 里）时立即拒绝。
+Calls carrying a `requestId` are awaited by the canvas' `dshRpc()`, with a 20s timeout; opening the canvas page directly in a browser (outside DSH) rejects immediately.
 
-### 本地存储
+### Local storage
 
-| 位置 | 内容 |
+| Location | Contents |
 | --- | --- |
-| `<DSH home>/flow/workspaces.json`（+ `.lock`） | 工作区 / 节点 / 投影消息，gzip 压缩存放（明文 JSON 也能读）；**只支持单实例写入** |
-| `<stateDir>/<teamId>/events.jsonl` | 团队**事实源**：append-only 事件日志（默认 `stateDir` 是 `.dsh-flow`） |
-| `<stateDir>/<teamId>/state.json` · `manifest.json` · `mail/` | 检查点、元信息、每个成员一个收件箱 |
-| `dsh-flow:map-card-positions:v3` | 会话卡坐标（与旧版画布兼容） |
-| `dsh-flow:cluster-positions:v1` | 团队区域卡片坐标 |
-| `dsh-flow:map-collapsed-cards:v1` | 折叠状态 |
-| `dsh-flow:map-quick-phrases:v1` | 快捷词 |
-| `dsh-flow:map-branch-anchors` | 分支锚点 |
+| `<DSH home>/flow/workspaces.json` (+ `.lock`) | Workspaces / nodes / projected messages, stored gzipped (plain JSON is readable too); **single writer only** |
+| `<stateDir>/<teamId>/events.jsonl` | The team **source of truth**: an append-only event log (the default `stateDir` is `.dsh-flow`) |
+| `<stateDir>/<teamId>/state.json` · `manifest.json` · `mail/` | Checkpoint, metadata, and one mailbox per member |
+| `dsh-flow:map-card-positions:v3` | Session card coordinates |
+| `dsh-flow:cluster-positions:v1` | Team region card coordinates |
+| `dsh-flow:map-collapsed-cards:v1` | Collapsed state |
+| `dsh-flow:map-quick-phrases:v1` | Quick phrases |
+| `dsh-flow:map-branch-anchors` | Branch anchors |
 
-浏览器侧存的**全是视觉元数据**，会话真身始终在 DSH——清缓存只丢布局，不影响状态。
+Everything stored in the browser is **visual metadata only**; the real session always lives in DSH — clearing the cache loses layout and nothing else.
 
-## 设计取舍
+## Design decisions
 
-**一张画布，层级化编排。** 会话与团队本来就是同一次工作的两个视角：团队由会话拉起，任务在会话里汇报。拆成两个页面只会让两边各养一套引擎、各长一套外观。现在引擎（`engine.js`）只管相机、手势、裁剪和连线，与业务无关；会话与团队都是它上面的节点和边，团队作为嵌套区域长在需求时间轴之下——层级用包含表达，时间用列表达。
+**One canvas, hierarchical arrangement.** Sessions and teams are two views of the same piece of work: a team is raised by a session, and tasks are reported in the session. Splitting them into two pages would only mean two engines and two appearances. The engine (`engine.js`) handles only camera, gestures, culling and edges, and knows nothing about the domain; sessions and teams are both nodes and edges on top of it, with the team growing as a nested region beneath the requirement timeline — hierarchy by containment, time by columns.
 
-**团队数据存在自己家里。** 团队结构落在自己的 append-only 日志里，画布读自己的
-`map-api`，不镜像任何人的状态。这样做的直接后果是**卸载 agent-teams 之后一切照常**：
-没有"降级成冻结的快照"这个中间态，因为从来没有过第二份记录。装了 agent-teams 时
-它是来源注册表里的一个**只读来源**，一个开关，不是一个依赖。
+**Team data lives at home.** Team structure lands in this plugin's own append-only log, and the canvas reads its own `map-api`, mirroring nobody's state. The direct consequence is that **uninstalling agent-teams changes nothing**: there is no "degrade to a frozen snapshot" middle state, because there was never a second record. When agent-teams is installed it is a **read-only source** in the registry — a switch, not a dependency.
 
-**中继消息在投影层结构化。** 信封解析放在宿主侧 `index.js` 而不是渲染层，因为落盘的就是脏数据，晚洗不如早洗；渲染层只对存量旧数据做同规则兜底。
+**Relay messages are structured at the projection layer.** Envelope parsing lives host-side in `index.js` rather than in the render layer, because what lands on disk is already dirty data and washing late is worse than washing early; the render layer only applies the same rule to older data as a fallback.
 
-**写操作收口到草稿卡。** 画布上的追问 / 分支 / 新建会话都走草稿卡这一个入口，其余动作仍由宿主原生对话完成——画布不做第二个 composer。
+**Writes funnel through the draft card.** Follow-up / branch / new-session on the canvas all go through that one entry point, and everything else is still done in the host's native conversation — the canvas does not build a second composer.
 
-**立绘即身份。** 成员名与角色关键词哈希映射到 `assets/` 的职业立绘：画布成员卡、检查器气泡、成员行三处同源，未匹配回退首字色块。容器背景跟随明暗主题。
+**Artwork is identity.** Member names and role keywords hash to the profession artwork in `assets/`: the member card, the inspector bubbles and the member rows all read from the same source, falling back to a colour block with the first character. The container background follows the light/dark theme.
 
-## 开发
+## Development
 
 ```sh
-pnpm test             # 434 项：规则核心、真文件系统的 store、调度器、工具、整个内核
-pnpm run build        # 语法 + 逐层边界 + serve 白名单 + 主题 token 纪律
-pnpm test:diff        # 31 项与 dsh-agent-teams 的差分（同名函数喂同一批输入，比结论）
-pnpm test:rehearsal   # 拿一份真实的 .agent-teams 目录演练：磁盘上每条都能读到
+pnpm test             # 434 tests: the rules core, the store on a real filesystem, the scheduler, the tools, the whole kernel
+pnpm run build        # syntax + layer boundaries + serve allowlist + theme token discipline
+pnpm test:diff        # 31 differential checks against dsh-agent-teams (same functions, same inputs, conclusions compared)
+pnpm test:rehearsal   # rehearse against a real .agent-teams directory: everything on disk is reachable
 
 dsh web
-# 对话区顶部标签行点「智能体画布」
+# click the Agent Canvas tab above the conversation area
 ```
 
-**改完 `src/` 里的东西一定要跑 `pnpm run build`。** 它不只是语法检查：每一层的
-不变量都在那里断言（纯核不许碰 IO 与 `ctx`、画布不许碰 `node:` 或任何 host 层、
-host 层不许进 serve 白名单、依赖只许指向内侧、每层的入口必须存在）。这些错误的
-共同点是**在 `pnpm test` 下全绿** —— 一个画布模块 `import 'node:fs'` 只有浏览器会
-发现，一个漏进白名单的模块只有一个 404 会发现。
+**After changing anything under `src/`, always run `pnpm run build`.** It is not only a syntax check: every layer's invariant is asserted there (the pure core may not touch IO or `ctx`, the canvas may not touch `node:` or any host layer, host layers may not enter the serve allowlist, dependencies must point inward only, every layer's entry must exist). What those mistakes have in common is being **green under `pnpm test`** — a canvas module doing `import 'node:fs'` is only discoverable in a browser, and a module missing from the allowlist only through a 404.
 
-一条没有断言的边界会随时间消失，剩下的只是一个碰巧这么放的目录。
+A boundary nobody asserts decays over time, and what is left is just a directory that happens to sit there.
 
+Changing `client.js` **requires restarting the host**: the client bundle carries a `rev` hash and is only repacked on restart. `engine.js` / `src/**` / `theme.css` / `assets/*.png` go through an in-memory cache keyed by mtime and are revalidated with `cache-control: no-cache` + ETag — every request confirms the file has not changed (and returns 200 with the new content if it has), so refreshing the page is enough.
 
-改动 `client.js` 后**必须重启宿主**：客户端 bundle 有 `rev` 哈希，重启才会重新打包。`engine.js` / `src/**` / `theme.css` / `assets/*.png` 按 mtime 走内存缓存并以 `cache-control: no-cache` + ETag 复验——每次请求都会确认文件没变（变了就回 200 新内容），所以改完刷新页面即可。
+## Known limits
 
-## 已知边界
+- **The canvas' actual rendering has no automated tests**: the 434 tests cover the host side (rules, store, scheduler, tools, kernel) and the **pure rendering functions** of the panel modules. The canvas' DOM behaviour — dragging, the `<select>` interaction, clickable task rows, repainting after an edit — has to be walked through in a real browser, and that part has no CI behind it.
+- **The `.agent-teams` source is read-only**: it can be listed and read, but not edited from the canvas (`canAppend` is false). It is somebody else's record, and appending would write a second copy of a team into our log under an id we do not own.
+- **There is no edge between a team and its session**: the team record only says which session raised it; the dialogue chain on the canvas comes from the session projection itself.
+- **Both data locations are single-writer**: `workspaces.json` and the team store each have a cross-process lock and a "modified by another instance" warning, but the lock is advisory and two open copies can still overwrite each other.
+- **The canvas' own text is not internationalised**: tab names follow the host's language, the canvas' internal text is currently Chinese.
+- **The canvas page carries no navigation chrome**: its only entry is the host tab bar. The tab only appears when there are sessions (the host returns null for a blank session). If the host's `slots` service is missing the tab is not registered, and only the direct link works.
 
-- **画布的实际渲染没有自动化测试**：434 项测试覆盖的是宿主侧（规则、store、调度器、
-  工具、内核）与面板模块的**纯渲染函数**。画布的 DOM 行为——拖拽、`<select>` 交互、
-  可点任务行、编辑后的重绘——需要在真实浏览器里打开逐项过一遍，这部分没有 CI 兜底。
-- **`.agent-teams` 来源是只读的**：可以列出来看，不能从画布改（`canAppend` 为假）。
-  它是别人的记录，追加等于用我们不拥有的 id 在我们的日志里写第二份团队。
-- **团队与会话之间没有连线**：团队记录里只有"由哪个会话拉起"；画布上的对话链来自会话投影本身。
-- **两个数据位置都只支持单实例写入**：`workspaces.json` 与团队 store 各有跨进程锁与
-  「已被另一实例修改」告警，但锁是咨询性的，双开仍可能互相覆盖。
-- **画布内部文案未国际化**：标签名会跟随宿主中/英，画布内部文案暂为中文。
-- **画布页不带导航 chrome**：入口只有宿主标签行。标签只在**有会话**时出现（宿主对空白会话整个返回 null）。若宿主 `slots` 服务缺失，标签不会注册，此时只能用直链。
+## License
 
-## 许可证
-
-MIT © 2026 rootkiller6788 —— 见 [LICENSE](LICENSE)。
+MIT © 2026 rootkiller6788 — see [LICENSE](LICENSE).

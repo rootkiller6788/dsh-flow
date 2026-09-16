@@ -237,6 +237,23 @@ dsh-flow (纯 JS，无运行时依赖)
 
 ## 与 dsh-agent-teams 的对照
 
+用宿主自己的词说，这是**插件内部有没有服务划分**的区别 —— 宿主把这件事讲成
+"everything is a plugin"、"Plugins, not loop changes"，落到代码上就是 `core` 与
+`seam` 的分法：
+
+| 通常的说法 | 宿主自己的术语 | 判据 |
+| --- | --- | --- |
+| **微内核** | `core` 尽量小，能力都挂在**声明出来的 seam** 上；新行为走扩展点，不改 `core` | dsh-flow：`rules/` 纯核（不碰 IO、不碰 `ctx`）+ 三个服务 + 一个组合根 |
+| **宏内核** | 没有 seam，能力都长在 `core` 里 | dsh-agent-teams：`src/` 是一个平面（17 个 TS 模块 + `client/` 13 个），互相自由 `import`，没有断言模块边界的机制 |
+
+一条 seam 由三个角色构成——**Service Definition / Provider / Consumer**，三者齐了才算
+一条。在 dsh-flow 里这对齐得很直白：`runner/interface.js` 是定义，`manual.js` 与
+`subagents.js` 是两个 Provider，`tools/` 是 Consumer。
+
+**两者都是 DSH 插件**，都挂在宿主提供的 seam 上——差别在**插件内部**有没有自己的。
+功能划成 core 与 seam 之后，"加一种执行方式"是加一个 Provider，"加一种团队来源"是
+`register()` 一项；而在一个平铺的 `src/` 里，那是改核心。
+
 dsh-flow 的目标是**完整替代** [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)：
 它有的能力都要有，但**不依赖它** —— 装了它是可选的只读来源，没装照常跑完。
 

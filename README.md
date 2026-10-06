@@ -343,6 +343,43 @@ dsh-flow (plain JS, no runtime dependencies)
 
 Three rules break most quietly, and the gate handles each explicitly: a canvas module doing `import 'node:fs'` is **green everywhere under `pnpm test`** and only a browser would notice; a module missing from the serve allowlist is only discoverable through a 404; and a host module importing `canvas/` backwards is green in Node too. So these are not conventions, they are assertions.
 
+Here is how the two channels reach the canvas. Sessions arrive twice — live over postMessage and stored over `map-api` — while teams arrive only from the plugin's own store:
+
+```
+NODE   host process                           <stateDir>/<teamId>/
+ctx.sessions   ctx.workspaces                 events.jsonl   <- TRUTH, append-only
+ctx.subagents   ctx.llm                       state.json     <- checkpoint, rebuildable
+                                              manifest.json       mail/
+    |  subscribe: session/created               |  append + fold
+    |             session/event                 v
+    v
+  +----------------------+                    +--------------------------+
+  |index.js              |                    |store/                    |
+  |session projection    |                    |append-only log + snapshot|
+  +----------------------+                    +--------------------------+
+              |                                             |
+              | flow/workspaces.json                        | GET /map-api/teams (1 Hz)
+              | POST /map-api/projection {cursors}          | GET .../tasks/:k on demand
+--------------|---------------------------------------------|---------------------------
+HTTP boundary |                                             |
+              ------------------------------+----------------
+BROWSER                                     v
+                        +--------------------------------------+
+                        |src/canvas/   the Agent Canvas tab    |
+                        |one page - one engine - one figure    |
+                        +--------------------------------------+
+                                            ^ postMessage: live session state,
+                                            | theme, locale, RPC back to host
+                                            |
+                          +----------------------------------+
+                          |client.js                         |
+                          |the conversation.view tab         |
+                          |one iframe + action relay         |
+                          +----------------------------------+
+```
+
+That the team channel has only one source is the point, not an omission: if team records came from the host session, this would be a mirror again.
+
 **How team activity is observed: through its own channel, without emitting session events.** The source of truth is `<stateDir>/<teamId>/events.jsonl` (an append-only event log), projected to `GET /dsh-flow/map-api/teams` for the canvas to read.
 
 No `dsh-flow/*` event is written into the session because the host does not accept one: `KNOWN_SESSION_EVENT_TYPES` is a closed set generated at build time, whose comment states outright that a downstream plugin's events are "outside this list by construction" and that the registration surface is "deferred until there is a real consumer"; and `Session.append` offers no way to set the envelope's `ignorable` flag — without it an unrecognised type is treated as **required**, and the reader would rather refuse to reconstruct **the entire session**. So such an event would either be dropped or damage the log it landed in. The full argument is in the comment at the end of `kernel.js`.

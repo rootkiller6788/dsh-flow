@@ -343,6 +343,43 @@ dsh-flow (纯 JS，无运行时依赖)
 
 三条最容易悄悄破掉的规则，门都单独管：一个画布模块 `import 'node:fs'` 在 `pnpm test` 下**全绿**，只有浏览器会发现；一个漏进白名单的模块只有一个 404 会发现；一个反向 import `canvas/` 的 host 模块在 Node 下也全绿。所以这些不是约定，是断言。
 
+两条通道是这样到达画布的。会话走两条路——`client.js` 的 postMessage 是实时状态，`map-api` 是落盘投影；团队只有一条：
+
+```
+NODE   host process                           <stateDir>/<teamId>/
+ctx.sessions   ctx.workspaces                 events.jsonl   <- TRUTH, append-only
+ctx.subagents   ctx.llm                       state.json     <- checkpoint, rebuildable
+                                              manifest.json       mail/
+    |  subscribe: session/created               |  append + fold
+    |             session/event                 v
+    v
+  +----------------------+                    +--------------------------+
+  |index.js              |                    |store/                    |
+  |session projection    |                    |append-only log + snapshot|
+  +----------------------+                    +--------------------------+
+              |                                             |
+              | flow/workspaces.json                        | GET /map-api/teams (1 Hz)
+              | POST /map-api/projection {cursors}          | GET .../tasks/:k on demand
+--------------|---------------------------------------------|---------------------------
+HTTP boundary |                                             |
+              ------------------------------+----------------
+BROWSER                                     v
+                        +--------------------------------------+
+                        |src/canvas/   the Agent Canvas tab    |
+                        |one page - one engine - one figure    |
+                        +--------------------------------------+
+                                            ^ postMessage: live session state,
+                                            | theme, locale, RPC back to host
+                                            |
+                          +----------------------------------+
+                          |client.js                         |
+                          |the conversation.view tab         |
+                          |one iframe + action relay         |
+                          +----------------------------------+
+```
+
+团队那条只有单一来源是刻意的，不是遗漏：团队记录如果来自宿主会话，就又变成镜像了。
+
 **团队活动怎么被观察：走自己的通道，不发会话事件。** 事实源是 `<stateDir>/<teamId>/events.jsonl`（append-only 事件日志），投影成 `GET /dsh-flow/map-api/teams` 供画布读取。
 
 不往会话里写 `dsh-flow/*` 事件，是因为宿主不接纳：`KNOWN_SESSION_EVENT_TYPES` 是构建期生成的封闭集合，其注释明说下游插件的事件"按构造不在其中"、注册面"推迟到真有消费者时"；而 `Session.append` 不给设信封的 `ignorable` 标记——缺了它，一个不认识的类型会被当作**必需**，读取端宁可拒绝重建**整个会话**。所以那样的事件只会被丢弃，或者破坏它落进去的那份日志。完整推演见 `kernel.js` 末尾那段注释。

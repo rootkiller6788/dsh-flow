@@ -29,6 +29,26 @@ In the host's own words, the difference is **whether a plugin divides its own in
 
 A seam comprises three roles — **Service Definition / Provider / Consumer** — and is only complete with all three. In dsh-flow they line up plainly: `runner/interface.js` is the definition, `manual.js` and `subagents.js` are the two Providers, and `tools/` is the Consumer.
 
+```
+    +------------------------------------------------------+
+    |the Service Definition                                |
+    |runner/interface.js                                   |
+    +------------------------------------------------------+
+                |                              |
+        implements                     consumed by
+                v                              v
+    +----------------------+      +------------------------+
+    |manual.js             |      |tools/                  |
+    |subagents.js          |      |the Consumer            |
+    |the two Providers     |      |(13 flow_* tools)       |
+    +----------------------+      +------------------------+
+                ^
+                  kernel.js mounts exactly one of these, at composition time
+                  (two live schedulers would claim the same task)
+```
+
+`ctx.flowTeamSources` has the same three roles but the Providers sit in a **registry** rather than behind a pick, because those implementations genuinely coexist. The picture above is `flowRunner`, the seam where exactly one may be live.
+
 **Both are DSH plugins**, and both attach to seams the host provides — the difference is whether the plugin has seams of its own. Once the functionality is split into core and seam, "add another way to execute" is adding a Provider and "add another kind of team source" is one `register()` call; on a flat `src/`, that work is changing the core.
 
 So this is an **opposition, not an absorption**: the capability surfaces can be aligned (the 13 tools map one to one to `agent_teams_*`, and the 31 differential checks in `pnpm test:diff` guard that line), but the two kernel shapes cannot give the same set of guarantees.

@@ -29,6 +29,26 @@ dsh-flow 把这三件事都放在**内核形状**上解决：`rules/` 是纯核�
 
 一条 seam 由三个角色构成——**Service Definition / Provider / Consumer**，三者齐了才算一条。在 dsh-flow 里这对齐得很直白：`runner/interface.js` 是定义，`manual.js` 与 `subagents.js` 是两个 Provider，`tools/` 是 Consumer。
 
+```
+    +------------------------------------------------------+
+    |the Service Definition                                |
+    |runner/interface.js                                   |
+    +------------------------------------------------------+
+                |                              |
+        implements                     consumed by
+                v                              v
+    +----------------------+      +------------------------+
+    |manual.js             |      |tools/                  |
+    |subagents.js          |      |the Consumer            |
+    |the two Providers     |      |(13 flow_* tools)       |
+    +----------------------+      +------------------------+
+                ^
+                  kernel.js mounts exactly one of these, at composition time
+                  (two live schedulers would claim the same task)
+```
+
+`ctx.flowTeamSources` 三个角色一样，但 Provider 在**注册表**里而不是在一次挑选中——因为那几个实现是真的共存。上图这条是 `flowRunner`，它才是"只能有一个活着"的那条 seam。
+
 **两者都是 DSH 插件**，都挂在宿主提供的 seam 上——差别在**插件内部**有没有自己的。功能划成 core 与 seam 之后，"加一种执行方式"是加一个 Provider，"加一种团队来源"是 `register()` 一项；而在一个平铺的 `src/` 里，那是改核心。
 
 所以这是**对立**，不是囊括：能力面可以对齐（13 个工具与 `agent_teams_*` 一一对应，`pnpm test:diff` 的 31 项差分守着这条线），但两种内核形态给不出同一组保证。

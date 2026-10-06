@@ -230,6 +230,48 @@ agent-teams（或宿主）会把成员消息以 `Agent <uuid> sent a message:【
 
 边界由目录表达，由 `pnpm run build` **逐层断言** —— 一条没有断言的边界会随时间消失，剩下的只是一个碰巧这么放的目录。
 
+```
+NODE   host process   (plain JS, no build step, no runtime dependencies)
+
+                     +--------------------------------------------+
+                     |kernel.js    the composition root           |
+                     |                                            |
+                     |the one module that names store / sources / |
+                     |runner / tools / config together            |
+                     +--------------------------------------------+
+                                            |
+          |--------------|--------------|--------------|--------------|
+          v              v              v              v              v
+    +----------+   +----------+   +----------+   +----------+   +----------+
+    |store/    |   |sources/  |   |runner/   |   |tools/    |   |config/   |
+    |(5)       |   |(3)       |   |(11)      |   |(8)       |   |(2)       |
+    +----------+   +----------+   +----------+   +----------+   +----------+
+          |              |              |              |              |
+          ----------------------------------|--------------------------
+                                            v
+                     +--------------------------------------------+
+                     |rules/    (25)      PURE CORE               |
+                     |                                            |
+                     |no `node:`      no `ctx`                    |
+                     |plain Node can import it                    |
+                     +--------------------------------------------+
+                                            ^
+                                            | canvas imports rules/ and nothing else
+--------------------------------------------|-------------------------------------------
+BROWSER                                     | served over HTTP, ETag revalidated
+                     +--------------------------------------------------+
+                     |src/canvas/      (12 modules)                     |
+                     |                                                  |
+                     |canvas.js    core.js        html.js               |
+                     |markdown.js  relay.js       session.js            |
+                     |teams.js     team-panels.js                       |
+                     |scene.js     view.js        artwork.js            |
+                     |actions.js                                        |
+                     +--------------------------------------------------+
+```
+
+每个箭头都是"依赖"，全部指向 `rules/`：25（纯核）+ 5+3+11+8+2（宿主五层）+ 12（画布）= 门里断言的那 7 层、66 个模块。
+
 | 层 | 模块 | 门里断言的不变量 |
 | --- | --- | --- |
 | `rules/` | 25 | 纯核：不许 `node:`，不许出现 `ctx` —— 普通 Node 就能 import |

@@ -230,6 +230,48 @@ One name can have only one provider (a second `ctx.provide` under the same name 
 
 Boundaries are expressed by directories and **asserted layer by layer** by `pnpm run build` — a boundary nobody asserts decays over time, and what is left is just a directory that happens to sit there.
 
+```
+NODE   host process   (plain JS, no build step, no runtime dependencies)
+
+                     +--------------------------------------------+
+                     |kernel.js    the composition root           |
+                     |                                            |
+                     |the one module that names store / sources / |
+                     |runner / tools / config together            |
+                     +--------------------------------------------+
+                                            |
+          |--------------|--------------|--------------|--------------|
+          v              v              v              v              v
+    +----------+   +----------+   +----------+   +----------+   +----------+
+    |store/    |   |sources/  |   |runner/   |   |tools/    |   |config/   |
+    |(5)       |   |(3)       |   |(11)      |   |(8)       |   |(2)       |
+    +----------+   +----------+   +----------+   +----------+   +----------+
+          |              |              |              |              |
+          ----------------------------------|--------------------------
+                                            v
+                     +--------------------------------------------+
+                     |rules/    (25)      PURE CORE               |
+                     |                                            |
+                     |no `node:`      no `ctx`                    |
+                     |plain Node can import it                    |
+                     +--------------------------------------------+
+                                            ^
+                                            | canvas imports rules/ and nothing else
+--------------------------------------------|-------------------------------------------
+BROWSER                                     | served over HTTP, ETag revalidated
+                     +--------------------------------------------------+
+                     |src/canvas/      (12 modules)                     |
+                     |                                                  |
+                     |canvas.js    core.js        html.js               |
+                     |markdown.js  relay.js       session.js            |
+                     |teams.js     team-panels.js                       |
+                     |scene.js     view.js        artwork.js            |
+                     |actions.js                                        |
+                     +--------------------------------------------------+
+```
+
+Every arrow is a dependency and every one of them points at `rules/`: 25 (the pure core) + 5+3+11+8+2 (the five host layers) + 12 (the canvas) = the 66 modules across the 7 layers the gate asserts.
+
 | Layer | Modules | The invariant the gate asserts |
 | --- | --- | --- |
 | `rules/` | 25 | The pure core: no `node:`, no `ctx` — importable by plain Node |

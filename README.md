@@ -136,6 +136,19 @@ HTTP boundary-----------------------------|-------------------------------------
 
 The last line of each diagram is a real fork, not a defect on either side: registering a node type into the host's conversation means inheriting the host's chat rendering, while owning a page means carrying your own engine — which is what buys the 0-build reload.
 
+Side by side, in numbers:
+
+| | dsh-flow | dsh-agent-teams |
+| --- | --- | --- |
+| Modules | **66** (25 pure core + 29 host across 5 layers + 12 canvas) | 17 host + 13 client |
+| Lines | rules 3715 / host 5089 / canvas 2898 | host 8277 / client 6101 |
+| Internal import edges | asserted per layer, pointing inward only | 34, no direction rule |
+| Own `ctx` services | **3** (1 core + 2 seams) | **0** |
+| Host runtime packages imported directly | **0** static; 1 by dynamic `import()` (`@deepseek-ai/dsh-llm`) | 12 (`cordis` ×9, `dsh-session` ×6, `dsh-agent` ×6, `dsh-llm` ×5, `dsh-subagent` ×3 …) |
+| Artifact | source is the artifact (`main: index.js`) | `main: lib/index.js`; build = `clean-build + tsc ×2 + tsdown` |
+
+The module count is the least interesting row — 66 against 30 says nothing about quality. What the table is for is the row before it: 3 services of its own against 0. A plugin with 0 cannot be extended from outside, because there is no declared point at which to extend it; a plugin with 3 can be replaced at exactly 2 of them, at composition time, without a line changing in the other 64 modules.
+
 ### What it is like to use
 
 | | dsh-flow | dsh-agent-teams |

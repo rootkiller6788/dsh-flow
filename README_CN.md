@@ -53,6 +53,89 @@ dsh-flow 把这三件事都放在**内核形状**上解决：`rules/` 是纯核�
 
 所以这是**对立**，不是囊括：能力面可以对齐（13 个工具与 `agent_teams_*` 一一对应，`pnpm test:diff` 的 31 项差分守着这条线），但两种内核形态给不出同一组保证。
 
+下面这张是那个平面，**从源码里读出来的，不是从它的 README 里抄的**。它不提供任何自己的服务——`ctx.provide` 出现 0 次——我们 `store/` 那一层干的活由 `state.ts` 干，而它没有层可以待：
+
+```
+NODE   host process                           @nanmicoder/dsh-agent-teams
+
+  host seams it CONSUMES  -  it provides none of its own  (ctx.provide: 0)
+  ctx.tools  ctx.agents  ctx.subagents  ctx.llm  ctx.commands  ctx.systemPrompt
+  ----------------------------------------+--------------------------------------
+                                          v
+    +------------------------------------------------------------------------------+
+    |index.ts     484 lines      the entry                                         |
+    |registers 13 agent_teams_* tools + 2 commands + 1 system-prompt section       |
+    |and 4 HTTP routes under /plugins/dsh-agent-teams/                             |
+    +-------------------------------------|----------------------------------------+
+                                          v
+    +-------------------------------------+----------------------------------------+
+    | the flat plane: 17 modules, 34 import edges between them, no direction rule  |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | |capabilities  |    |command       |    |profiles      |    |web-routes    | |
+    | |110           |    |141           |    |750           |    |98            | |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | |tools         |    |scheduler     |    |members       |    |snapshot      | |
+    | |2456          |    |523           |    |728           |    |267           | |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | +--------------------------------------------------------------------------+ |
+    | |state.ts      1030 lines      imported by 7 of the other 16 modules       | |
+    | |readTeam / writeTeam / withTeamLock        (node:fs, the de facto hub)    | |
+    | +--------------------------------------------------------------------------+ |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | |events        |    |harness-compat|    |quality-gates |    |types         | |
+    | |78            |    |198           |    |987           |    |249           | |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    +-------------------------------------|----------------------------------------+
+HTTP boundary-----------------------------|---------------------------------------------
+                                          v
+    +------------------------------------------------------------------------------+
+    |BROWSER   -   the card renders INSIDE the native conversation                 |
+    |                                                                              |
+    |registers a conversation NODE TYPE plus 3 slot injections:                    |
+    |  ctx.uiConversation.events.register(agentTeamsCardDefinition)                |
+    |  slots: shell.overlay | conversation.chat.commandview | ...chat.node         |
+    |polls GET /plugins/dsh-agent-teams/state on a timer                           |
+    +------------------------------------------------------------------------------+
+```
+
+它的数据路径是**从磁盘到浏览器单向**的，活动状态在读取时并进来：
+
+```
+NODE   host process
+
+  <workspace path>/<stateDir>/<teamId>/          <- one directory per workspace
+    team.json          the whole team, rewritten on every change
+    inbox/*.jsonl      one mailbox per member
+                    |
+                    |  readdir + readFile, folded on every request
+                    v
+        +------------------------------------+    ctx.agents.get(sessionId)
+        |snapshot.ts                         |           |
+        |collectTeamsActivity                |           |  live subagent status
+        +------------------------------------+           v
+                    |                         merged into the same snapshot
+                    v
+    +------------------------------------------------------------------------------+
+    |GET /plugins/dsh-agent-teams/state    ?archived=1 for the archive             |
+    |GET /plugins/dsh-agent-teams/plan     staging edits                           |
+    |GET /plugins/dsh-agent-teams/halt     stop / resume                           |
+    |GET /plugins/dsh-agent-teams/assets   artwork                                 |
+    |                       all four behind BrowserRequestGate (connection auth)   |
+    +------------------------------------------------------------------------------+
+                                          |
+HTTP boundary-----------------------------|---------------------------------------------
+                                          v
+    +------------------------------------------------------------------------------+
+    |BROWSER    the AgentTeams card, inside the native chat stream                 |
+    |                                                                              |
+    |polls /state on a timer for the picture                                       |
+    |writes go back through /plan (approve, edit) and /halt (stop)                 |
+    +------------------------------------------------------------------------------+
+```
+
+两张图的最后一行是**真正的分岔，两边都不算缺陷**：往宿主会话里注册一个节点类型，就继承了宿主的聊天渲染；自己拥有一张页面，就要自己扛一套引擎——而正是后者换来了改一行刷新即见。
+
 ### 用起来是什么样
 
 | | dsh-flow | dsh-agent-teams |

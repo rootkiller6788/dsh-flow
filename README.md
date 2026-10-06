@@ -53,6 +53,89 @@ A seam comprises three roles — **Service Definition / Provider / Consumer** �
 
 So this is an **opposition, not an absorption**: the capability surfaces can be aligned (the 13 tools map one to one to `agent_teams_*`, and the 31 differential checks in `pnpm test:diff` guard that line), but the two kernel shapes cannot give the same set of guarantees.
 
+Here is that other plane, read out of its source rather than its README. It provides no service of its own — `ctx.provide` appears zero times — and `state.ts` does the job our `store/` layer does, without a layer to sit in:
+
+```
+NODE   host process                           @nanmicoder/dsh-agent-teams
+
+  host seams it CONSUMES  -  it provides none of its own  (ctx.provide: 0)
+  ctx.tools  ctx.agents  ctx.subagents  ctx.llm  ctx.commands  ctx.systemPrompt
+  ----------------------------------------+--------------------------------------
+                                          v
+    +------------------------------------------------------------------------------+
+    |index.ts     484 lines      the entry                                         |
+    |registers 13 agent_teams_* tools + 2 commands + 1 system-prompt section       |
+    |and 4 HTTP routes under /plugins/dsh-agent-teams/                             |
+    +-------------------------------------|----------------------------------------+
+                                          v
+    +-------------------------------------+----------------------------------------+
+    | the flat plane: 17 modules, 34 import edges between them, no direction rule  |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | |capabilities  |    |command       |    |profiles      |    |web-routes    | |
+    | |110           |    |141           |    |750           |    |98            | |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | |tools         |    |scheduler     |    |members       |    |snapshot      | |
+    | |2456          |    |523           |    |728           |    |267           | |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | +--------------------------------------------------------------------------+ |
+    | |state.ts      1030 lines      imported by 7 of the other 16 modules       | |
+    | |readTeam / writeTeam / withTeamLock        (node:fs, the de facto hub)    | |
+    | +--------------------------------------------------------------------------+ |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    | |events        |    |harness-compat|    |quality-gates |    |types         | |
+    | |78            |    |198           |    |987           |    |249           | |
+    | +--------------+    +--------------+    +--------------+    +--------------+ |
+    +-------------------------------------|----------------------------------------+
+HTTP boundary-----------------------------|---------------------------------------------
+                                          v
+    +------------------------------------------------------------------------------+
+    |BROWSER   -   the card renders INSIDE the native conversation                 |
+    |                                                                              |
+    |registers a conversation NODE TYPE plus 3 slot injections:                    |
+    |  ctx.uiConversation.events.register(agentTeamsCardDefinition)                |
+    |  slots: shell.overlay | conversation.chat.commandview | ...chat.node         |
+    |polls GET /plugins/dsh-agent-teams/state on a timer                           |
+    +------------------------------------------------------------------------------+
+```
+
+Its data path is one-directional from disk to browser, with the live agent status merged in at read time:
+
+```
+NODE   host process
+
+  <workspace path>/<stateDir>/<teamId>/          <- one directory per workspace
+    team.json          the whole team, rewritten on every change
+    inbox/*.jsonl      one mailbox per member
+                    |
+                    |  readdir + readFile, folded on every request
+                    v
+        +------------------------------------+    ctx.agents.get(sessionId)
+        |snapshot.ts                         |           |
+        |collectTeamsActivity                |           |  live subagent status
+        +------------------------------------+           v
+                    |                         merged into the same snapshot
+                    v
+    +------------------------------------------------------------------------------+
+    |GET /plugins/dsh-agent-teams/state    ?archived=1 for the archive             |
+    |GET /plugins/dsh-agent-teams/plan     staging edits                           |
+    |GET /plugins/dsh-agent-teams/halt     stop / resume                           |
+    |GET /plugins/dsh-agent-teams/assets   artwork                                 |
+    |                       all four behind BrowserRequestGate (connection auth)   |
+    +------------------------------------------------------------------------------+
+                                          |
+HTTP boundary-----------------------------|---------------------------------------------
+                                          v
+    +------------------------------------------------------------------------------+
+    |BROWSER    the AgentTeams card, inside the native chat stream                 |
+    |                                                                              |
+    |polls /state on a timer for the picture                                       |
+    |writes go back through /plan (approve, edit) and /halt (stop)                 |
+    +------------------------------------------------------------------------------+
+```
+
+The last line of each diagram is a real fork, not a defect on either side: registering a node type into the host's conversation means inheriting the host's chat rendering, while owning a page means carrying your own engine — which is what buys the 0-build reload.
+
 ### What it is like to use
 
 | | dsh-flow | dsh-agent-teams |

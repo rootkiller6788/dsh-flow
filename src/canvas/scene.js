@@ -1,6 +1,7 @@
 // dsh-flow canvas — see src/canvas/canvas.js for the module map.
 import { state, Engine, CLUSTER_GAP, TURN_W, TURN_H } from './core.js'
 import { conversationCards, conversationGraphView, draftPlacement } from './session.js'
+import { sessionFamily } from './html.js'
 import { buildTeamHierarchy, buildFallbackCluster } from './teams.js'
 
 
@@ -8,7 +9,7 @@ import { buildTeamHierarchy, buildFallbackCluster } from './teams.js'
 // Unified scene: requirement timeline + nested team regions + typed edges
 // ---------------------------------------------------------------------------
 function buildScene() {
-  const threads = state.workspace?.threads ?? []
+  const threads = sessionFamily(state.workspace?.threads ?? [], state.currentDsh?.id, state.viewScope)
   const turnCards = conversationCards(threads)
   const graph = conversationGraphView(turnCards)
   const nodes = []
@@ -21,6 +22,7 @@ function buildScene() {
   const unanchored = []
   const claimedThreads = new Set()
   for (const team of state.teams) {
+    if (state.viewScope === 'session' && !threads.some(thread => thread.dshSessionId === team.captainSessionId)) continue
     const thread = threads.find(item => item.dshSessionId === team.captainSessionId)
     // One thread composes with ONE team: a second team reusing the same
     // session would fight over the same turns' geometry, so it falls back
@@ -34,7 +36,7 @@ function buildScene() {
     for (const card of threadCards) card.position = built.cardPositions.get(card.id) ?? card.position
   }
   for (const card of graph.cards) {
-    nodes.push({ id: card.id, kind: 'turn', rect: { x: card.position.x, y: card.position.y, w: TURN_W, h: TURN_H }, card })
+    nodes.push({ id: card.id, kind: 'turn', rect: { x: card.position.x, y: card.position.y, w: TURN_W, h: state.compactView ? 208 : TURN_H }, card })
     maxX = Math.max(maxX, card.position.x + TURN_W)
   }
   for (const card of graph.cards) {

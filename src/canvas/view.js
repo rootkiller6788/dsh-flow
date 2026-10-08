@@ -118,14 +118,14 @@ function turnCardHtml(node) {
   const card = node.card
   const thread = state.workspace?.threads.find(item => item.id === card.dshThreadId)
   const color = thread?.color ?? 'var(--accent)'
-  const source = card.agentEvent !== null ? '智能体消息' : card.parentId === null ? 'DSH 会话' : card.turnIndex === 0 ? 'DSH 分支' : '追问'
+  const source = card.agentEvent !== null ? '智能体消息' : card.turnIndex === 0 && card.sourceOrigin === 'subagent' ? '子 Agent' : card.parentId === null ? 'DSH 会话' : card.turnIndex === 0 ? 'DSH 分支' : '追问'
   const childCount = state.scene.graph.childCounts.get(card.id) ?? 0
   const descendantCount = state.scene.graph.descendantCounts.get(card.id) ?? 0
   const collapsed = state.collapsedCardIds.has(card.id)
   const foldButton = childCount === 0 || card.canContinue === true ? '' : `<button class="card-corner card-corner--fold" data-action="toggle-card-children" data-card="${escapeHtml(card.id)}" aria-expanded="${collapsed ? 'false' : 'true'}" title="${collapsed ? '展开后续对话' : '折叠后续对话'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/>${collapsed ? '<path d="M8 3.5v9"/>' : ''}</svg></button>`
   const continueButton = card.canContinue === true ? `<button class="card-corner card-corner--continue" data-action="open-continue" data-thread="${card.dshThreadId}" data-card="${escapeHtml(card.id)}" title="添加追问" aria-label="添加追问"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>` : ''
   const branchButton = childCount === 0 || card.canContinue === true || !Number.isInteger(card.answer?.sourceSeq) ? '' : `<button class="card-corner card-corner--branch" data-action="open-branch" data-thread="${card.dshThreadId}" data-card="${escapeHtml(card.id)}" data-seq="${card.answer.sourceSeq}" title="在新对话中分支" aria-label="在新对话中分支"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M13.08 1.37a1.83 1.83 0 0 1 1.82 1.83 1.83 1.83 0 0 1-1.82 1.82c-.78 0-1.44-.49-1.71-1.17H4.36c.44.42.8.92 1.06 1.48l1.69 3.74c.78 1.72 2.45 2.85 4.31 2.97.29-.63.93-1.06 1.66-1.06a1.83 1.83 0 0 1 0 3.65c-.82 0-1.52-.55-1.75-1.3a6.93 6.93 0 0 1-5.15-3.73l-1.69-3.73a1.9 1.9 0 0 0-1.72-1.13V2.55l10.24-.01c.27-.68.93-1.17 1.71-1.17Zm0 10.9c-.29 0-.53.24-.53.53s.24.53.53.53c.29-.01.52-.24.52-.53 0-.29-.23-.52-.52-.53Zm0-9.6c-.29 0-.53.24-.53.53s.24.52.53.53a.53.53 0 0 0 0-1.06Z" fill="currentColor" stroke="none"/></svg></button>`
-  const body = card.answer === null
+  const body = state.compactView ? '' : card.answer === null
     ? card.error === null ? '<p class="card-body-empty">等待助手回复</p>' : ''
     : card.answer.pending && card.answer.text === '' ? '<p class="card-body-pending">正在回复</p>'
       : `${renderMarkdown(card.answer.text)}${card.answer.pending ? '<p class="card-body-pending">正在回复</p>' : ''}`
@@ -143,12 +143,20 @@ function turnCardHtml(node) {
   const whoStrip = speaker !== null && !speaker.fromQuestion
     ? `<div class="answer-who"><span class="avatar avatar--sm" style="${whoVars(speaker.name)}">${escapeHtml(speaker.name.slice(0, 1))}</span><span>${escapeHtml(speaker.to && speaker.to !== 'parent' ? `${speaker.name} → ${speaker.to}` : speaker.name)}</span></div>`
     : ''
+  const { messages: cardMessages } = messagesForCard(card)
+  const processes = inspectorProcessEntries(cardMessages)
+  const lastProcess = processes.at(-1)
+  const running = card.canContinue && state.liveReplies.get(thread?.dshSessionId)?.running === true
+  const activity = running ? '运行中' : card.error !== null ? '本轮失败' : card.answer !== null ? '已回复' : '暂无回复记录'
+  const lastAction = lastProcess ? `最新工具：${lastProcess.name} · ${lastProcess.error != null ? '失败' : lastProcess.result == null ? '等待结果' : '已返回'}` : '尚无工具记录'
+  const summary = `<div class="flow-activity"><span class="flow-status ${running ? 'flow-status--running' : card.error !== null ? 'flow-status--error' : ''}"><i></i>${activity}</span><p class="flow-latest">${escapeHtml(lastAction)}</p><span class="flow-hint">点击查看执行详情</span></div>`
+  const title = state.compactView ? (thread?.dshSessionTitle ?? thread?.title ?? source) : card.question
   const dotColor = card.agentEvent !== null ? whoSolid(card.agentEvent.from) : escapeHtml(color)
-  return `<article class="card card--turn${card.id === state.selectedNodeId ? ' is-selected' : ''}" data-node="${escapeHtml(card.id)}" data-node-kind="turn" data-thread="${card.dshThreadId}" data-position-key="${escapeHtml(card.positionKey)}" style="left:${node.rect.x}px;top:${node.rect.y}px;--dot:${dotColor}">
+  return `<article class="card card--turn${state.compactView ? ' card--summary' : ''}${card.id === state.selectedNodeId ? ' is-selected' : ''}" data-node="${escapeHtml(card.id)}" data-node-kind="turn" data-thread="${card.dshThreadId}" data-position-key="${escapeHtml(card.positionKey)}" style="left:${node.rect.x}px;top:${node.rect.y}px;--dot:${dotColor}">
     ${gripHtml(card.id)}${foldButton}${continueButton}${branchButton}
-    <div class="card-title-row">${identity}<button class="card-title-btn" data-action="open-dsh" data-thread="${card.dshThreadId}" data-seq="${Number.isInteger(card.sourceSeq) ? card.sourceSeq : ''}" title="在 DSH 中打开完整会话">${escapeHtml(card.question)}</button></div>
+    <div class="card-title-row">${identity}<button class="card-title-btn" data-action="open-dsh" data-thread="${card.dshThreadId}" data-seq="${Number.isInteger(card.sourceSeq) ? card.sourceSeq : ''}" title="在 DSH 中打开完整会话">${escapeHtml(title)}</button></div>
     <div class="card-meta"><span>${source}</span><span>第 ${card.turnIndex + 1} 轮</span>${card.error === null ? '' : '<span class="meta-fail">失败</span>'}${card.processCount > 0 ? `<span class="meta-chip">工具 ${card.processCount}</span>` : ''}${descendantCount > 0 && !collapsed ? `<span class="meta-chip">+${descendantCount} 后续</span>` : ''}</div>
-    <div class="card-body">${whoStrip}${body}${card.error === null ? '' : `<p class="card-body-fail" title="${escapeHtml(card.error.text)}">本轮失败：${escapeHtml(card.error.text)}</p>`}</div>
+    ${state.compactView ? summary : `<div class="card-body">${whoStrip}${body}${card.error === null ? '' : `<p class="card-body-fail" title="${escapeHtml(card.error.text)}">本轮失败：${escapeHtml(card.error.text)}</p>`}</div>`}
     <footer class="card-foot"><button data-action="open-dsh" data-thread="${card.dshThreadId}" data-seq="${Number.isInteger(card.sourceSeq) ? card.sourceSeq : ''}" title="在 DSH 中打开完整会话"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 3.5H4.5A1.5 1.5 0 0 0 3 5v6.5A1.5 1.5 0 0 0 4.5 13H11a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 3.5h3v3M12.4 3.6 7.5 8.5"/></svg>DSH</button><button data-action="archive-thread" data-thread="${card.dshThreadId}" title="归档此会话"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h11M5.5 7v5.5a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V7"/><path d="M4 5 5 2.8a.7.7 0 0 1 .6-.4h4.8a.7.7 0 0 1 .6.4L12 5M6 9.5h4"/></svg>归档</button></footer>
   </article>`
 }
@@ -486,14 +494,24 @@ function render() {
   }
 
   const canvas = renderCanvasHtml()
-  app.innerHTML = `<main class="stage-root"><header class="stage-topbar"><div class="canvas-toolbar">
-    <button class="tool-btn" type="button" data-action="reset-canvas" title="重置画布：恢复自动布局与默认视角"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 1 1.5 3.6M3 8V4.5M3 8h3.5"/></svg></button>
-    <span class="tool-sep"></span>
-    <button class="tool-btn" type="button" data-action="zoom-out" aria-label="缩小" title="缩小"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/></svg></button>
-    <span class="tool-zoom">${Math.round(camera.zoom * 100)}%</span>
-    <button class="tool-btn" type="button" data-action="zoom-in" aria-label="放大" title="放大"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
-    ${damagedChipHtml()}
-  </div></header><section class="stage-main">${state.error ? `<div class="error-toast" role="alert"><span>${escapeHtml(state.error)}</span><button data-action="dismiss-error" aria-label="关闭" title="关闭">×</button></div>` : ''}${canvas}<button class="follow-chip" type="button" data-action="follow-selection" hidden aria-label="基于所选内容创建追问" title="基于所选内容追问"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 3.5h10v6.25H7.2L4 12.5V9.75H3Z"/><path d="M8 4.9v3.4M6.3 6.6h3.4"/></svg><span>追问</span></button></section></main>`
+  app.innerHTML = `<main class="stage-root"><header class="stage-topbar">
+    <div class="flow-heading"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="7" width="5" height="6" rx="1.5"/><rect x="13" y="2" width="5" height="6" rx="1.5"/><rect x="13" y="12" width="5" height="6" rx="1.5"/><path d="M7 10h3V5h3M10 10v5h3"/></svg><strong>执行链路</strong><span>${state.scene?.graph?.cards.length ?? 0} 个节点</span></div>
+    <div class="flow-controls">
+      <div class="flow-segment" role="group" aria-label="会话范围">
+        <button type="button" data-action="view-scope" data-value="session" aria-pressed="${state.viewScope === 'session'}">当前会话</button>
+        <button type="button" data-action="view-scope" data-value="workspace" aria-pressed="${state.viewScope === 'workspace'}">工作区</button>
+      </div>
+      <div class="flow-segment" role="group" aria-label="显示内容">
+        <button type="button" data-action="view-content" data-value="summary" aria-pressed="${state.compactView}">流程摘要</button>
+        <button type="button" data-action="view-content" data-value="full" aria-pressed="${!state.compactView}">完整内容</button>
+      </div>
+      <div class="canvas-toolbar" role="group" aria-label="画布缩放">
+        <button class="tool-btn" type="button" data-action="zoom-out" aria-label="缩小"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9"/></svg></button>
+        <span class="tool-zoom">${Math.round(camera.zoom * 100)}%</span>
+        <button class="tool-btn" type="button" data-action="zoom-in" aria-label="放大"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
+        <button class="tool-btn" type="button" data-action="reset-canvas" aria-label="重置视角" title="重置画布：恢复自动布局与默认视角"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 1 1.5 3.6M3 8V4.5M3 8h3.5"/></svg></button>
+      </div>${damagedChipHtml()}
+    </div></header><section class="stage-main">${state.error ? `<div class="error-toast" role="alert"><span>${escapeHtml(state.error)}</span><button data-action="dismiss-error" aria-label="关闭" title="关闭">×</button></div>` : ''}${canvas}<button class="follow-chip" type="button" data-action="follow-selection" hidden aria-label="基于所选内容创建追问" title="基于所选内容追问"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 3.5h10v6.25H7.2L4 12.5V9.75H3Z"/><path d="M8 4.9v3.4M6.3 6.6h3.4"/></svg><span>追问</span></button></section></main>`
 
   const isRegion = node => node.kind === 'teamRegion' || node.kind === 'memberRegion'
   regionVirtualizer = Engine.createVirtualizer({ layer: document.querySelector('.regions-layer'), margin: VIEWPORT_MARGIN, build: mountNode })

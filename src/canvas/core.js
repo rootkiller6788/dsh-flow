@@ -13,6 +13,7 @@ const CLUSTER_POSITIONS_KEY = 'dsh-flow:cluster-positions:v1'
 const COLLAPSED_CARDS_KEY = 'dsh-flow:map-collapsed-cards:v1'
 const QUICK_PHRASES_KEY = 'dsh-flow:map-quick-phrases:v1'
 const BRANCH_ANCHORS_KEY = 'dsh-flow:map-branch-anchors'
+const VIEW_PREFERENCES_KEY = 'dsh-flow:view-preferences:v1'
 const DEFAULT_QUICK_PHRASES = ['展开说明', '举例', '通俗易懂', '对比解释']
 const MAX_QUICK_PHRASES = 12
 const MAX_QUICK_PHRASE_LENGTH = 16
@@ -45,6 +46,7 @@ const TEAMS_URL = '/dsh-flow/map-api/teams'
 const state = {
   summaries: [], workspace: null, activeId: null, selectedNodeId: null,
   currentDsh: null, dshWorkspaces: [], selectedDshWorkspaceId: null,
+  viewScope: 'session', compactView: true,
   pendingReplies: new Map(), pendingRpc: new Map(), liveReplies: new Map(),
   draft: null, error: '', workspaceLoad: 0,
   branchAnchors: new Map(), collapsedCardIds: new Set(), quickPhrases: DEFAULT_QUICK_PHRASES, quickPhraseEditorOpen: false,
@@ -87,6 +89,15 @@ try {
   const stored = JSON.parse(localStorage.getItem(QUICK_PHRASES_KEY) ?? 'null')
   if (Array.isArray(stored)) state.quickPhrases = normalizeQuickPhrases(stored)
 } catch { /* defaults */ }
+
+try {
+  const saved = JSON.parse(localStorage.getItem(VIEW_PREFERENCES_KEY) ?? 'null')
+  if (saved?.scope === 'workspace') state.viewScope = 'workspace'
+  if (saved?.compact === false) state.compactView = false
+} catch { /* defaults */ }
+function persistViewPreferences() {
+  try { localStorage.setItem(VIEW_PREFERENCES_KEY, JSON.stringify({ scope: state.viewScope, compact: state.compactView })) } catch { /* private browsing */ }
+}
 
 function normalizeQuickPhrases(value) {
   const phrases = []
@@ -155,7 +166,7 @@ function whoVars(name) {
 function whoSolid(name) { return `var(${WHO_SOLID[whoHash(name)]})` }
 
 export { app, Engine, state, escapeHtml, selectorValue, turnPositions, clusterPositions,
-  normalizeQuickPhrases, persistQuickPhrases, persistCollapsedCards, persistBranchAnchors, rememberBranchAnchor,
+  persistViewPreferences, normalizeQuickPhrases, persistQuickPhrases, persistCollapsedCards, persistBranchAnchors, rememberBranchAnchor,
   api, post, dshRpc, settleRpc, canReplaceView, deferCanvasRefresh,
   TURN_POSITIONS_KEY, CLUSTER_POSITIONS_KEY, COLLAPSED_CARDS_KEY, QUICK_PHRASES_KEY, BRANCH_ANCHORS_KEY,
   DEFAULT_QUICK_PHRASES, MAX_QUICK_PHRASES, MAX_QUICK_PHRASE_LENGTH,

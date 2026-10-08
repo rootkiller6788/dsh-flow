@@ -1,5 +1,5 @@
 // dsh-flow canvas — see src/canvas/canvas.js for the module map.
-import { state, app, api, post, dshRpc, escapeHtml, rememberBranchAnchor, deferCanvasRefresh, turnPositions, clusterPositions, persistQuickPhrases, persistCollapsedCards, MAX_QUICK_PHRASES, MAX_QUICK_PHRASE_LENGTH } from './core.js'
+import { state, app, api, post, dshRpc, escapeHtml, rememberBranchAnchor, deferCanvasRefresh, turnPositions, clusterPositions, persistQuickPhrases, persistCollapsedCards, persistViewPreferences, MAX_QUICK_PHRASES, MAX_QUICK_PHRASE_LENGTH } from './core.js'
 import { render, camera, focusActiveNode, setError, openInspector, closeInspector } from './view.js'
 import { refreshSummaries, refreshProjection, draftPlacement, conversationCards, conversationGraphView, latestMessage } from './session.js'
 import { pollTeams } from './teams.js'
@@ -322,6 +322,16 @@ app.addEventListener('click', async event => {
   }
   const thread = state.workspace?.threads.find(item => item.id === button.dataset.thread)
   try {
+    if (button.dataset.action === 'view-scope' || button.dataset.action === 'view-content') {
+      if (state.draft !== null) return setError('请先完成或取消正在编辑的消息')
+      if (button.dataset.action === 'view-scope') state.viewScope = button.dataset.value === 'workspace' ? 'workspace' : 'session'
+      else state.compactView = button.dataset.value !== 'full'
+      persistViewPreferences()
+      state.needsCenter = true
+      state.cameraTouched = false
+      render()
+      return
+    }
     if (button.dataset.action === 'follow-selection') {
       const followup = selectionFollowup
       hideSelectionFollowup()

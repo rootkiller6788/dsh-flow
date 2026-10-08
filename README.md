@@ -285,6 +285,13 @@ The dialogue weave itself comes from **relay parsing in the conversation project
 - **Theme**: light / dark follows the host (`theme/change` event → `data-theme`), dark is driven by the same design tokens, and the artwork container background switches with it.
 - The wheel scrolls a card's own answer over a card, and zooms the canvas over empty space.
 
+
+### Focus on one session
+
+The toolbar separates session scope from content display. **Current session** shows the selected session's root and recursively linked children; **Workspace** restores all projected sessions.
+**Summary** hides chat bodies and shows the latest recorded tool/result and reply state; **Full content** restores answers. Click a node to inspect its actual messages and tool records.
+These two display preferences persist in browser localStorage. They neither delete session logs nor change agent permissions. A historical reply is not proof that a development task is complete; running state is shown only when the native live feed supplies it.
+
 ## Configuration
 
 Override this plugin's config in the profile's `cordis.patch.yml`:
